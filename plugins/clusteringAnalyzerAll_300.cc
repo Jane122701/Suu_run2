@@ -21,8 +21,6 @@
 #include "TH2.h"
 #include<TRandom3.h>
 
-#include <numeric>
-
 #include "correction.h"
 #include "ROOT/RDataFrame.hxx"
 // user include files
@@ -64,9 +62,6 @@
 #include <cmath>
 #include "TLorentzVector.h"
 #include "TVector3.h"
-#include "DataFormats/PatCandidates/interface/Muon.h"
-#include "DataFormats/PatCandidates/interface/Electron.h"
-#include "DataFormats/PatCandidates/interface/Tau.h"
 
 #include "DataFormats/Candidate/interface/Candidate.h"
 #include "DataFormats/PatCandidates/interface/PackedCandidate.h"
@@ -76,7 +71,6 @@
 
 #include "TTree.h"
 #include "TFile.h"
-#include "TF1.h"
 
 #include "CondFormats/JetMETObjects/interface/JetCorrectorParameters.h"
 #include "CondFormats/JetMETObjects/interface/JetCorrectionUncertainty.h"
@@ -85,7 +79,6 @@
 #include "CondFormats/JetMETObjects/interface/JetResolutionObject.h"
 #include "JetMETCorrections/Modules/interface/JetResolution.h"
 #include "PhysicsTools/PatUtils/interface/SmearedJetProducerT.h"
-#include "CondFormats/JetMETObjects/interface/FactorizedJetCorrector.h"
 
 #include "FWCore/Framework/interface/EDProducer.h"
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
@@ -99,7 +92,9 @@
 #include "LHAPDF/LHAPDF.h"
 #include "LHAPDF/Reweighting.h"
 
-#include <Pythia8/Pythia.h>
+#include "DataFormats/PatCandidates/interface/Muon.h"
+#include "DataFormats/PatCandidates/interface/Electron.h"
+#include "DataFormats/PatCandidates/interface/Tau.h"
 
 //#include "AnalysisDataFormats/TopObjects/interface/TtGenEvent.h"
 //#include "SimDataFormats/GeneratorProducts/interface/GenEventInfoProduct.h"
@@ -123,14 +118,12 @@ private:
    bool isHEM(const double jet_eta, const double jet_phi);
    double top_pt_SF(double top_pt);
    double calcAlphas(double q2);
-   std::vector<edm::FileInPath> get_AK4_JEC_paths(std::string, std::string);
    double calcRenormWeight(double q2, int up_or_dn, int nQCD);
    double calcFactorizWeight(LHAPDF::PDF* pdf, double id1, double id2, double x1, double x2, double q2, int up_or_dn);
-   std::string returnJECFile(std::string year, std::string systematicType, std::string jet_type, std::string runType, bool isAK4PFPuppi);
-   double getJECUncertaintyFromSources(std::string jet_type, double pt, double eta, bool isAK4PFPuppi);
+   std::string returnJECFile(std::string year, std::string systematicType, std::string jet_type, std::string runType);
+   double getJECUncertaintyFromSources(std::string jet_type, double pt, double eta);
    const reco::Candidate* parse_chain(const reco::Candidate* cand);
    bool applyJERSource(std::string uncertainty_source, double eta);
-   int lhapdfPDGID(const int pdgid) const { return std::abs(pdgid) == 21 ? 0 : pdgid; }
    std::map<std::string, std::map<std::string, std::string>> file_map;
 
    //init all inpaths, tokens, instrings
@@ -149,9 +142,7 @@ private:
    edm::EDGetTokenT< double > prefweightup_token;
    edm::EDGetTokenT< double > prefweightdown_token;
    edm::EDGetTokenT<edm::TriggerResults> triggerBits_;
-   edm::EDGetTokenT<edm::TriggerResults> metFilters_;
    edm::EDGetTokenT<double> m_rho_token;
-
     edm::EDGetTokenT<std::vector<pat::Muon>> muonToken_;
    edm::EDGetTokenT<std::vector<pat::Electron>> electronToken_;
    edm::EDGetTokenT<std::vector<pat::Tau>> tauToken_;
@@ -165,29 +156,19 @@ private:
    edm::FileInPath path_;
    edm::FileInPath bTagSF_path;
    edm::FileInPath bTagEff_path;
-  // edm::FileInPath JECUncert_AK8_path;
-  // edm::FileInPath JECUncert_AK4_path;
-  FactorizedJetCorrector *subjetCorrector;
+   edm::FileInPath JECUncert_AK8_path;
+   edm::FileInPath JECUncert_AK4_path;
 
    edm::FileInPath PUfile_path;
    std::string runType;
    std::string systematicType;
    std::string year;
    std::string lumiTag;
-    std::string pdfSetType;
 
    std::string jetVetoMapName;
    edm::FileInPath jetVetoMapFile;
 
    std::vector<std::string> triggers;
-   std::unique_ptr<Pythia8::Pythia> pythia_;
-
-    TFile *SD_corr_file;
-    TF1* puppisd_corrGEN;
-    TF1* puppisd_corrRECO_cen;
-    TF1* puppisd_corrRECO_for;
-    std::vector<edm::FileInPath> AK4_JEC_pars; 
-
 
    bool doPUID = false;
    bool doPDF = false;
@@ -201,7 +182,7 @@ private:
 
 
    //init event variables
-   bool doJEC              = false;
+   bool doJEC              = true;
    bool doJER              = false;  // will be set to true for MC
    bool doBtagSF           = false;  // will be set to true for MC
    bool doPUSF             = false;  // will be set to true for MC
@@ -213,15 +194,12 @@ private:
    bool _verbose           = false;  // do printouts of each section for debugging, set through cfg
    bool debug              = false;  // print out some other debug stuff, set through cfg
    bool runSideband        = false;  // change the HT region, set through cfg
-   bool includeTightBTag    = false; // include tight WP b-tagging info
-    bool useOptimizedWP      = false;
-    bool skipReclustering    = false; // 
-   int SJ_nAK4_10[2],SJ_nAK4_25[2],SJ_nAK4_50[100],SJ_nAK4_70[100],SJ_nAK4_100[100],SJ_nAK4_125[100],SJ_nAK4_150[100],SJ_nAK4_200[100],SJ_nAK4_300[100],SJ_nAK4_400[100],SJ_nAK4_600[100],SJ_nAK4_800[100],SJ_nAK4_1000[100];
-   double jet_pt[100], jet_eta[100], jet_mass[100], jet_dr[100], raw_jet_mass[100],raw_jet_pt[100],raw_jet_phi[100], jet_jec_full[100], AK4_jec_full[100];
+   int SJ_nAK4_50[100],SJ_nAK4_70[100],SJ_nAK4_100[100],SJ_nAK4_125[100],SJ_nAK4_150[100],SJ_nAK4_200[100],SJ_nAK4_300[100],SJ_nAK4_400[100],SJ_nAK4_600[100],SJ_nAK4_800[100],SJ_nAK4_1000[100];
+   double jet_pt[100], jet_eta[100], jet_mass[100], jet_dr[100], raw_jet_mass[100],raw_jet_pt[100],raw_jet_phi[100];
    double SJ_mass_50[100], SJ_mass_70[100],SJ_mass_100[100],superJet_mass[100],SJ_AK4_50_mass[100],SJ_AK4_70_mass[100];
    double SJ_mass_125[100], SJ_mass_150[100], SJ_mass_200[100],SJ_mass_300[100],SJ_mass_400[100],SJ_mass_600[100],SJ_mass_800[100],SJ_mass_1000[100];   
-   double AK4_mass[100], AK4_E[500], leadAK8_mass[10], jet_SD_mass[100], M_SD_uncorr_usrstr[100], SD_corr[100];;
-   double diSuperJet_mass,diSuperJet_mass_100, diSuperJet_mass_300;
+   double AK4_mass[100], AK4_E[500], leadAK8_mass[10];
+   double diSuperJet_mass,diSuperJet_mass_100;
    double top_pt_weight;
    double totHT = 0;
    double dijetMassOne, dijetMassTwo;
@@ -230,13 +208,12 @@ private:
    double AK4_bdisc[100], AK4_DeepJet_disc[100];
    int jet_ndaughters[100], jet_nAK4[100],jet_nAK4_20[100],jet_nAK4_30[100],jet_nAK4_50[100],jet_nAK4_70[100],jet_nAK4_100[100],jet_nAK4_150[100];
    double totMET;
-   double AK4_pt[100], jet_pt_gen[100];
    int lab_nAK4 = 0;
    double lab_AK4_pt[100];
    //double btag_score_uncut[100];
    int nAK4_uncut = 0;
    int nGenBJets_AK4[100],AK4_hadronFlavour[100], AK4_partonFlavour[100];
-   int nCategories = 2;
+   int nCategories = 3;
    double AK4_ptot[100], AK4_eta[100], AK4_phi[100];
    int SJ1_decision,SJ2_decision;
    double SJ1_BEST_scores,SJ2_BEST_scores;
@@ -258,11 +235,10 @@ private:
    int AK43_ndaughters[2], AK43_nsubjets[2]; 
    double AK43_thrust[2],AK43_sphericity[2],AK43_asymmetry[2],AK43_isotropy[2],AK43_aplanarity[2],AK43_FW1[2],AK43_FW2[2],AK43_FW3[2],AK43_FW4[2];
    double SJ_thrust[2],SJ_sphericity[2],SJ_asymmetry[2],SJ_isotropy[2],SJ_aplanarity[2],SJ_FW1[2],SJ_FW2[2],SJ_FW3[2],SJ_FW4[2];
-   double jet_px[100],jet_py[100],jet_pz[100],jet_E[100], AK4_px[100], AK4_py[100], AK4_pz[100];
 
    double JEC_uncert_AK8[100],JEC_uncert_AK4[100];
    //MP superjet AK4 jet momenta and energies, tedious,but means we can do some SJ calculations locally, these will also become BEST variables
-   double SJ1_AK4_px[20], SJ1_AK4_py[20], SJ1_AK4_pz[20], SJ1_AK4_E[20], CA4_E[500];
+   double SJ1_AK4_px[20], SJ1_AK4_py[20], SJ1_AK4_pz[20], SJ1_AK4_E[20];
    double SJ2_AK4_px[20], SJ2_AK4_py[20], SJ2_AK4_pz, SJ2_AK4_E[20];
 
    double AK8_hadronFlavour[100], AK8_partonFlavour[100];
@@ -273,9 +249,6 @@ private:
    double diAK8Jet_mass[100];
    double fourAK8JetMass;
    int nAK8diJets = 2;
-   double MPP_CA8_mass[100], MPP_CA8_pt[100], MPP_CA8_mass_[100]; 
-    int nMPP_CA8_jets;
-    double NJetMass, diSJ_mass_perc_diff, diSJ_Pt_perc_diff, NJetPt, diSuperJet_Pt;
 
    double PU_eventWeight_up, PU_eventWeight_nom, PU_eventWeight_down;
    double deepJet_wp_loose, deepJet_wp_med, deepjet_wp_tight;
@@ -299,8 +272,6 @@ private:
    bool fatjet_isHEM[100], jet_pre_isHEM[100], jet_isHEM[100];
    TH2F *truebjet_eff,*truecjet_eff, *lightjet_eff;
    TH2F *truebjet_eff_med,*truecjet_eff_med, *lightjet_eff_med;
-   int lastNonEmptyEFfMapPtBin_truec[30], lastNonEmptyEFfMapPtBin_trueb[30], lastNonEmptyEFfMapPtBin_truelight[30]; 
-   int lastNonEmptyEFfMapPtBin_med_truec[30], lastNonEmptyEFfMapPtBin_med_trueb[30], lastNonEmptyEFfMapPtBin_med_truelight[30]; 
 
    TH2F * jetVetoMap;
    double prefiringWeight_nom, prefiringWeight_up, prefiringWeight_down;
@@ -312,10 +283,8 @@ private:
    // PDF weight stuff
    int nPDFWeights, nScaleWeights;
    float pdfWeights[200], scaleWeights[200];
-   double PDFWeights_alphas, PDFWeights_varWeightsRMS,PDFWeights_varWeightsErr,PDFWeight_RMS_up, PDFWeight_RMS_down;
+   double PDFWeights_alphas, PDFWeights_varWeightsRMS,PDFWeights_varWeightsErr;
    double PDFWeights_renormWeights[2],PDFWeights_factWeightsRMSs[2];
-   double PDFWeight_68perc_up, PDFWeight_68perc_down;
-   double factWeights_up, factWeights_down;
    int PDFWeights_nVars;
    double alphas;
    int nVars; 
@@ -327,38 +296,16 @@ private:
    double scale_envelope[10];
 
    int LHAPDF_NOM;
-   int LHAPDF_VAR_LOW, LHAPDF_VAR_LOW_hess;
-   int LHAPDF_VAR_HIGH, LHAPDF_VAR_HIGH_hess;
-   int nQCD_vertices = 0;
+   int LHAPDF_VAR_LOW;
+   int LHAPDF_VAR_HIGH;
    PDF* nomPDF;
    PDF* varPDFs[102];
-   PDF* varPDFs_hess[102];
-   double scale_uncert_envelope_nQCD1_up, scale_uncert_envelope_nQCD1_down, scale_uncert_envelope_nQCD2_up, scale_uncert_envelope_nQCD2_down;
-    double scale_uncert_envelope_nQCD3_up, scale_uncert_envelope_nQCD3_down;
-
-
-    double renormWeight_nQCD1_up, renormWeight_nQCD1_down;
-    double renormWeight_nQCD2_up, renormWeight_nQCD2_down;
-    double renormWeight_nQCD3_up, renormWeight_nQCD3_down;
-    double renormWeight_nQCD4_up, renormWeight_nQCD4_down;
-    double renormWeight_nQCD5_up, renormWeight_nQCD5_down;
-
    double PDFWeights_factWeightsRMS_up, PDFWeights_factWeightsRMS_down;
-  
-   double PDFWeights_envelope_scale_uncertainty_up,PDFWeights_envelope_scale_uncertainty_down;
-   double PDFWeightUp_replica, PDFWeightDown_replica; // BEST-style PDF weights
-  
    double PDFWeights_renormWeight_up, PDFWeights_renormWeight_down;
    double PDFWeightUp, PDFWeightDown;  // BEST-style PDF weights
    TRandom3 *randomNum = new TRandom3(); // for JERs
 
    bool passesJetPUID[100];
-
-   double jet_mass_by_mass[100], jet_mass_by_mass_[100], jet_mass_perc_diff[100], jet_pt_by_pt[100], jet_pt_perc_diff[100];
-    int smallestNJets;
-    int jet_nParts_by_mass[100], MPP_CA8_nParts[100];
-    double nParts_perc_diff[100];
-
 
    // variables to create a control region
    int nAK8_ET100 = 0, nAK8_ET150 = 0, nAK8_ET200 = 0, nAK8_ET250 = 0, nAK8_ET300 = 0, nAK8_ET350 = 0, nAK8_ET400 = 0;
@@ -387,36 +334,13 @@ private:
 
    std::vector<std::string> uncertainty_sources;
    std::map<std::string, std::unique_ptr<JetCorrectionUncertainty>> JEC_map_AK4;   // contains the correctors for each uncertainty source
-   std::map<std::string, std::unique_ptr<JetCorrectionUncertainty>> JEC_map_AK4PFPuppi;   // contains the correctors for each uncertainty source
    std::map<std::string, std::unique_ptr<JetCorrectionUncertainty>> JEC_map_AK8;   // contains the correctors for each uncertainty source
 
-   int nMuons_looseID_looseIso = 0, nMuons_medID_looseIso = 0, nMuons_looseID_medIso = 0;
+ int nMuons_looseID_looseIso = 0, nMuons_medID_looseIso = 0, nMuons_looseID_medIso = 0;
    int nElectrons_looseID_medISO = 0, nElectrons_medID_looseISO= 0, nElectrons_looseID_looseISO= 0, nElectrons_looseID_NOISO = 0;
    int nTau_looseVsJet_looseVsMuon_VVLooseVse = 0, nTau_VLooseVsJet_looseVsMuon_VVLooseVse = 0, nTau_VVLlooseVsJet_looseVsMuon_VVLooseVse= 0 , nTau_looseVsJet_VLooseVsMuon_VVLooseVse = 0;
    int nTau_VLooseVsJet_VLooseVsMuon_VVLooseVse = 0,nTau_VVLlooseVsJet_VLooseVsMuon_VVLooseVse = 0;
 
-    int nEM_ = 0;
-
-    // selection cuts
-    int nAK8Cut  = 2;
-    int nHAK8Cut = 1;
-    double HT_cut = 1500.;
-    double ET_cut = 300;
-
-
-    double chi_pt[100];
-    int nChis = 0;
-
-
-    // hessian pdf weights
-    TH1F *h_PDFWeights_hess;
-    int nPDFWeights_hess;
-    double PDFWeights_hess[110] = {}; // might be longer than the expected 100?
-    //std::vector<LHAPDF::PDF*> pdfs_replica;
-    //std::vector<LHAPDF::PDF*> pdfs_hessian;
-
-    std::string pdfname;
-    std::string pdfname_hess;
 };
 
 //_constructor_
@@ -437,7 +361,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
 
    includeAllBranches = iConfig.getParameter<bool>("includeAllBranches");
    slimmedSelection   = iConfig.getParameter<bool>("slimmedSelection");
-   useOptimizedWP  = iConfig.getParameter<bool>("useOptimizedWP");   // use the limit-optimized selection
    _verbose           = iConfig.getParameter<bool>("verbose");
    runSideband        = iConfig.getParameter<bool>("runSideband");
 
@@ -445,48 +368,11 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    jetVetoMapFile = iConfig.getParameter<edm::FileInPath>("jetVetoMapFile");
 
    doPDF = iConfig.getParameter<bool>("doPDF");
-   includeTightBTag = iConfig.getParameter<bool>("includeTightBTag");
-
-
-   skipReclustering = iConfig.getParameter<bool>("skipReclustering");
-   if(doPDF || ( runType.find("QCDMC_Pt") != std::string::npos  && systematicType == "nom")) pdfSetType       = iConfig.getParameter<std::string>("pdfSetType");
-    
-
-   if(useOptimizedWP)
-   {
-      if(slimmedSelection) // slimmed optimized selection       
-      {
-         nAK8Cut  = 3;
-         nHAK8Cut = 3;
-         HT_cut = 2200;
-         ET_cut = 300;
-      }
-   }
-   else if(slimmedSelection)
-   {
-      nAK8Cut  = 3;
-      nHAK8Cut = 2;
-      HT_cut = 1600.;
-      ET_cut = 300;
-   }
-
-    //if(_verbose) 
-   std::cout << "Using ET / HT / nAK8 / nHAK8 cuts = " << ET_cut << " / " << HT_cut << " / " << nAK8Cut << " / " << nHAK8Cut << std::endl;
 
    // "pdfWeights" "NNPDF31"
 
    //triggers     = iConfig.getParameter<std::string>("triggers"); // not currently set up: am setting triggers manually in this file
    triggerBits_ = consumes<edm::TriggerResults>(iConfig.getParameter<edm::InputTag>("bits"));
-   metFilters_  = consumes<edm::TriggerResults>(edm::InputTag("TriggerResults", "", "PAT"));
-   if( systematicType.find("JEC") != std::string::npos)
-    {
-        doJEC = true;
-        std::cout << "Will vary JEC values by their uncertainties." << std::endl;
-    }
-    else
-    {
-        std::cout << "Will use nominal JECs." << std::endl;
-    }
 
    if( (runType.find("MC") != std::string::npos) || (runType.find("Suu") != std::string::npos))    //don't want these variables for data
    {
@@ -502,89 +388,52 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       bTagSF_path    = iConfig.getParameter<edm::FileInPath>("bTagSF_path");
       bTagEff_path   = iConfig.getParameter<edm::FileInPath>("bTagEff_path");
 
-      GeneratorToken_       = consumes<GenEventInfoProduct>(iConfig.getParameter<edm::InputTag>("genEventInfoTag")); //generator
-       ///// PYTHIA RENORM + FACT UNCERT STUFF
-        pythia_ = std::make_unique<Pythia8::Pythia>("../share/Pythia8/xmldoc",false);
-        //from https://github.com/cms-sw/cmssw/blob/master/FastSimulation/ParticleDecay/src/PythiaDecays.cc
-        pythia_->settings.flag("ProcessLevel:all", false);
-        pythia_->settings.flag("Print:quiet", true);
-        //following https://github.com/cms-sw/cmssw/blob/master/GeneratorInterface/Pythia8Interface/src/Py8InterfaceBase.cc
-        pythia_->init();
+      if(doPDFWeights)
+      {
 
-        if( (doPDFWeights) || (runType.find("QCD") != std::string::npos    && systematicType == "nom") )
-        {
-               lheEventProductToken_ = consumes<LHEEventProduct> (edm::InputTag("externalLHEProducer", "", "GEN"));
+         GeneratorToken_       = consumes<GenEventInfoProduct>(iConfig.getParameter<edm::InputTag>("genEventInfoTag")); //generator
+         lheEventProductToken_ = consumes<LHEEventProduct> (edm::InputTag("externalLHEProducer", "", "GEN"));
          //std::cout << "Getting the PDF weight tokens." << std::endl;
          //pdfWeightToken_ = consumes<std::vector<float>>(edm::InputTag("PDFweights")); // calculated with PDFRecalculator
          //scaleWeightToken_ = consumes<std::vector<float>>(edm::InputTag("ScaleWeights")); // calculated with PDFRecalculator
          //std::cout << "Got the PDF weight tokens." << std::endl;
          //pdfWeightToken_ = consumes<std::vector<float>>(edm::InputTag("PDFRecalculator:PDFweights"));
          //scaleWeightToken_ = consumes<std::vector<float>>(edm::InputTag("PDFRecalculator:ScaleWeights"));
-            if(runType.find("QCDMC_Pt") != std::string::npos)
-            {
-                LHAPDF_NOM = 306000; // previously 303600
-                //LHAPDF_VAR_LOW_hess  = 306001; // old 303601
-                //LHAPDF_VAR_HIGH_hess = 306100; // old 303700
 
-                LHAPDF_VAR_LOW  = 306001; // old 303201
-                LHAPDF_VAR_HIGH = 306100; // old 303300
-
-                pdfname      = "NNPDF31_nnlo_as_0118";
-                //pdfname_hess = "NNPDF31_nnlo_as_0118_hessian";
-            }
-         if((runType.find("QCDMC") != std::string::npos) || ((runType.find("TTJets") != std::string::npos)) || ((runType.find("WJets") != std::string::npos)))
+         if((runType.find("QCD") != std::string::npos) || ((runType.find("TTJets") != std::string::npos)))
          {
             LHAPDF_NOM = 325300;
             LHAPDF_VAR_LOW = 325301;
             LHAPDF_VAR_HIGH = 325402;
-            pdfname_hess = "NNPDF31_nnlo_as_0118_mc_hessian_pdfas";
          }
          else if(runType.find("Suu") != std::string::npos)
          {
             LHAPDF_NOM = 325500;
             LHAPDF_VAR_LOW = 325501;
             LHAPDF_VAR_HIGH = 325600;
-            pdfname_hess = "NNPDF31_nnlo_as_0118_nf_4_mc_hessian";
          }
          else   // NOT correct for TTbar
          {
             LHAPDF_NOM = 325300;
             LHAPDF_VAR_LOW = 325301;
             LHAPDF_VAR_HIGH = 325402;
-            pdfname_hess = "NNPDF31_nnlo_as_0118_mc_hessian_pdfas";
          }
 
-         if     (pdfSetType == "relic")
-            {
-                nVars      = LHAPDF_VAR_HIGH      - LHAPDF_VAR_LOW + 1;
-                std::cout << "The Relic PDF sets are LHAPDF_VAR_LOW-LHAPDF_VAR_HIGH: " << LHAPDF_VAR_LOW << "/" << LHAPDF_VAR_HIGH << std::endl;
-                LHAPDF::initPDFSet(1,pdfname);
-            }
-            else if(pdfSetType == "hessian") 
-            {
-                nVars = LHAPDF_VAR_HIGH_hess - LHAPDF_VAR_LOW_hess + 1;
-                std::cout << "The Hessian PDF sets are LHAPDF_VAR_LOW-LHAPDF_VAR_HIGH: " << LHAPDF_VAR_LOW_hess << "/" << LHAPDF_VAR_HIGH_hess << std::endl;
-                LHAPDF::initPDFSet(1,pdfname_hess); 
-            }
-            
-            LHAPDF::setVerbosity(0);
+         nVars = LHAPDF_VAR_HIGH - LHAPDF_VAR_LOW + 1;
+         std::cout << "The PDF sets are LHAPDF_VAR_LOW-LHAPDF_VAR_HIGH: " << LHAPDF_VAR_LOW << "/" << LHAPDF_VAR_HIGH << std::endl;
       }
       
    }
    PUfile_path        = iConfig.getParameter<edm::FileInPath>("PUfile_path");
-   //JECUncert_AK8_path = iConfig.getParameter<edm::FileInPath>("JECUncert_AK8_path");
-  // JECUncert_AK4_path = iConfig.getParameter<edm::FileInPath>("JECUncert_AK4_path");
+   JECUncert_AK8_path = iConfig.getParameter<edm::FileInPath>("JECUncert_AK8_path");
+   JECUncert_AK4_path = iConfig.getParameter<edm::FileInPath>("JECUncert_AK4_path");
 
    // prefiring weights
    prefweight_token     = consumes< double >(edm::InputTag("prefiringweight:nonPrefiringProb"));
-   if(systematicType == "nom")
-   {
    prefweightup_token   = consumes< double >(edm::InputTag("prefiringweight:nonPrefiringProbUp"));
    prefweightdown_token = consumes< double >(edm::InputTag("prefiringweight:nonPrefiringProbDown"));
-   }
 
    doPUID = iConfig.getParameter<bool>("doPUID");
-   includeTightBTag = iConfig.getParameter<bool>("includeTightBTag");
 
    ///////////////////////////////////////
    /////// JEC Uncertainty stuff /////////
@@ -596,9 +445,9 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    /////////////////////////////////////////////////////////////////////////
    //////////////// create file maps for the JEC sources ///////////////////
 
-   file_map["2015"]["MC"] = "Summer19UL16APV_V7_MC";
-   file_map["2016"]["MC"] = "Summer19UL16_V7_MC";
-   file_map["2017"]["MC"] = "Summer19UL17_V5_MC";
+   file_map["2015"]["MC"] = "Summer19UL16APV_V9_MC";
+   file_map["2016"]["MC"] = "Summer19UL16_V9_MC";
+   file_map["2017"]["MC"] = "Summer19UL17_V6_MC";
    file_map["2018"]["MC"] = "Summer19UL18_V5_MC";
 
    file_map["2015"]["dataBCD"] = "Summer19UL16APV_RunBCD_V7_DATA";
@@ -606,35 +455,21 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
 
    file_map["2016"]["dataFGH"] = "Summer19UL16_RunFGH_V7_DATA";
 
-   file_map["2017"]["dataB"] = "Summer19UL17_RunB_V5_DATA";
-   file_map["2017"]["dataC"] = "Summer19UL17_RunC_V5_DATA";
-   file_map["2017"]["dataD"] = "Summer19UL17_RunD_V5_DATA";
-   file_map["2017"]["dataE"] = "Summer19UL17_RunE_V5_DATA";
-   file_map["2017"]["dataF"] = "Summer19UL17_RunF_V5_DATA";
+   file_map["2017"]["dataB"] = "Summer19UL17_RunB_V6_DATA";
+   file_map["2017"]["dataC"] = "Summer19UL17_RunC_V6_DATA";
+   file_map["2017"]["dataD"] = "Summer19UL17_RunD_V6_DATA";
+   file_map["2017"]["dataE"] = "Summer19UL17_RunE_V6_DATA";
+   file_map["2017"]["dataF"] = "Summer19UL17_RunF_V6_DATA";
 
-   file_map["2018"]["dataA"] = "Summer19UL18_RunA_V5_DATA";
-   file_map["2018"]["dataB"] = "Summer19UL18_RunB_V5_DATA";
-   file_map["2018"]["dataC"] = "Summer19UL18_RunC_V5_DATA";
-   file_map["2018"]["dataD"] = "Summer19UL18_RunD_V5_DATA";
-
-
-    // initialize JEC text files for PUPPI AK4 jets (for softdrop correction) in order 
-
-    std::vector<edm::FileInPath> AK4_JEC_paths = get_AK4_JEC_paths(year, runType);
-
-    std::vector<JetCorrectorParameters> AK4_JEC_pars;
-    for(auto fpath : AK4_JEC_paths)
-    {
-        AK4_JEC_pars.push_back( JetCorrectorParameters(fpath.fullPath().c_str()));
-    }
-    // init the corrector
-    subjetCorrector = new FactorizedJetCorrector(AK4_JEC_pars);
+   file_map["2018"]["dataA"] = "Summer19UL18_RunA_V6_DATA";
+   file_map["2018"]["dataB"] = "Summer19UL18_RunB_V6_DATA";
+   file_map["2018"]["dataC"] = "Summer19UL18_RunC_V6_DATA";
+   file_map["2018"]["dataD"] = "Summer19UL18_RunD_V6_DATA";
 
 
    if(_verbose)std::cout << "Getting text file names." << std::endl;
-   edm::FileInPath  JEC_source_text_AK4 = (edm::FileInPath )returnJECFile(year, systematicType, "AK4", runType, false );
-   edm::FileInPath  JEC_source_text_AK8 = (edm::FileInPath )returnJECFile(year, systematicType, "AK8", runType, false );
-   edm::FileInPath  JEC_source_text_AK4PFPuppi = (edm::FileInPath )returnJECFile(year, systematicType, "AK4", runType, true ); // for SD mass correction
+   edm::FileInPath  JEC_source_text_AK4 = (edm::FileInPath )returnJECFile(year, systematicType, "AK4", runType );
+   edm::FileInPath  JEC_source_text_AK8 = (edm::FileInPath )returnJECFile(year, systematicType, "AK8", runType );
 
    if(_verbose)std::cout << "AK4/AK8 text files are " << JEC_source_text_AK4 << "--------" << JEC_source_text_AK8 << std::endl;
    // OLD way of doing JEC uncertainties, these are paths to the total uncertainties
@@ -702,38 +537,25 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       uncertainty_sources = {"Total"};
    }
 
-   else if ((systematicType.find("BBEC1_year") != std::string::npos) )  uncertainty_sources = {"RelativeJEREC1","RelativePtEC1","RelativeStatEC"};
-    else if ((systematicType.find("Absolute_year") != std::string::npos) ) uncertainty_sources = {"AbsoluteStat","RelativeStatFSR","TimePtEta"};
-    else if ((systematicType.find("RelativeSample_year") != std::string::npos))  uncertainty_sources = {"RelativeSample"};
-    else if ((systematicType.find("FlavorQCD") != std::string::npos) )    uncertainty_sources = {"FlavorQCD"};
-    else if ((systematicType.find("RelativeBal") != std::string::npos)) uncertainty_sources = {"RelativeBal"};
-    else if ((systematicType.find("BBEC1") != std::string::npos) )       uncertainty_sources = {"PileUpPtBB", "PileUpPtEC1", "RelativePtBB"};
+   else if ((systematicType.find("BBEC1_year") != std::string::npos) )   uncertainty_sources = {"RelativeJEREC1","RelativePtEC1","RelativeStatEC"};
+   else if ((systematicType.find("EC2_year") != std::string::npos) )     uncertainty_sources = {"RelativeJEREC2","RelativePtEC2"};
+   else if ((systematicType.find("Absolute_year") != std::string::npos) )  uncertainty_sources = {"AbsoluteStat","RelativeStatFSR","TimePtEta"};
+   else if ((systematicType.find("HF_year") != std::string::npos) )      uncertainty_sources = {"RelativeStatHF"};
+   else if ((systematicType.find("RelativeSample_year") != std::string::npos))  uncertainty_sources = {"RelativeSample"};
+   else if ((systematicType.find("FlavorQCD") != std::string::npos) )    uncertainty_sources = {"FlavorQCD"};
+   else if ((systematicType.find("RelativeBal") != std::string::npos))  uncertainty_sources = {"RelativeBal"};
+   else if ((systematicType.find("HF") != std::string::npos) )           uncertainty_sources = {"PileUpPtHF", "RelativeJERHF","RelativePtHF"};
+   else if ((systematicType.find("BBEC1") != std::string::npos) )        uncertainty_sources = {"PileUpPtBB", "PileUpPtEC1", "RelativePtBB"};
+   else if ((systematicType.find("EC2") != std::string::npos) )          uncertainty_sources = {"PileUpPtEC2"};
 
-    // this has been changed to split the absolute uncertainty into 2 new sources
-    else if ((systematicType.find("AbsoluteCal") != std::string::npos) )    uncertainty_sources = {"SinglePionECAL","SinglePionHCAL"};
-    else if ((systematicType.find("AbsolutePU") != std::string::npos) )  uncertainty_sources = { "PileUpDataMC","PileUpPtRef"};
-    else if ((systematicType.find("Absolute") != std::string::npos) )    uncertainty_sources = {"AbsoluteMPFBias", "AbsoluteScale", "Fragmentation","PileUpDataMC","PileUpPtRef","RelativeFSR","SinglePionECAL","SinglePionHCAL"};
-
-    // ONES THAT DO NOT CONTRIBUTE ( all scale factors in eta range are 0 )
-    // will comment out this
-    else if ((systematicType.find("AbsoluteTheory") != std::string::npos) )    uncertainty_sources = {"AbsoluteScale", "Fragmentation","AbsoluteMPFBias","RelativeFSR"};
-
-    // THESE ARE ALWAYS 0 
-    else if ((systematicType.find("HF") != std::string::npos) )          uncertainty_sources = {"PileUpPtHF", "RelativeJERHF","RelativePtHF"};
-    else if ((systematicType.find("EC2_year") != std::string::npos) )    uncertainty_sources = {"RelativeJEREC2","RelativePtEC2"};
-    else if ((systematicType.find("EC2") != std::string::npos) )        uncertainty_sources = {"PileUpPtEC2"};
-    else if ((systematicType.find("HF_year") != std::string::npos) )  uncertainty_sources = {"RelativeStatHF"};
-
-    // THESE ARE DIFFERENT SPLITTINGS (NOT USED)
-    else if ((systematicType.find("AbsoluteScale") != std::string::npos) )  uncertainty_sources = {"AbsoluteScale"};
-    else if ((systematicType.find("Fragmentation") != std::string::npos) )  uncertainty_sources = {"Fragmentation"};
-    else if ((systematicType.find("AbsoluteMPFBias") != std::string::npos) )    uncertainty_sources = {"AbsoluteMPFBias"};
-    else if ((systematicType.find("RelativeFSR") != std::string::npos) )       uncertainty_sources = {"RelativeFSR"};
-
-    
-    else {std::cout << "Running uncertainty " << systematicType << std::endl;}
+   // this has been changed to split the absolute uncertainty into 2 new sources
+   else if ((systematicType.find("AbsoluteCal") != std::string::npos) )     uncertainty_sources = {"SinglePionECAL","SinglePionHCAL"};
+   else if ((systematicType.find("AbsoluteTheory") != std::string::npos) )     uncertainty_sources = {"AbsoluteScale", "Fragmentation","AbsoluteMPFBias","RelativeFSR"};
+   else if ((systematicType.find("AbsolutePU") != std::string::npos) )     uncertainty_sources = { "PileUpDataMC","PileUpPtRef"};
+   else if ((systematicType.find("Absolute") != std::string::npos) )     uncertainty_sources = {"AbsoluteMPFBias", "AbsoluteScale", "Fragmentation","PileUpDataMC","PileUpPtRef","RelativeFSR","SinglePionECAL","SinglePionHCAL"};
 
 
+   else {std::cout << "Running uncertainty " << systematicType << std::endl;}
 
 
 
@@ -753,12 +575,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       if(_verbose)std::cout <<  "AK4: adding the uncertainty object to the JEC map" << std::endl;
       JEC_map_AK4.emplace(uncertainty_source, std::move(source_uncertainty_reduced_AK4));
       if(_verbose)std::cout <<  "AK4: added the uncertainty object to the JEC map" << std::endl;
-
-       // AK8PFPuppi  (for SD mass corrections)
-        JetCorrectorParameters source_parameters_reduced_AK4PFPuppi(JEC_source_text_AK4PFPuppi.fullPath().c_str(), uncertainty_source);
-        std::unique_ptr<JetCorrectionUncertainty> source_uncertainty_reduced_AK4PFPuppi(new JetCorrectionUncertainty(source_parameters_reduced_AK4PFPuppi));
-        JEC_map_AK4PFPuppi.emplace(uncertainty_source, std::move(source_uncertainty_reduced_AK4PFPuppi));
-
 
 
       if(_verbose)std::cout <<  "----- AK8 jets: -----" << std::endl;
@@ -838,22 +654,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       truecjet_eff_med = (TH2F*)bTagEff_file->Get("h_effcJets_med"); 
       lightjet_eff_med = (TH2F*)bTagEff_file->Get("h_effLightJets_med"); 
 
-   // find last 
-
-        for(int jjj=1; jjj < truebjet_eff->GetNbinsY()+1; jjj++)
-        {
-            for(int iii=1; iii < truebjet_eff->GetNbinsX()+1; iii++ )
-            {
-                if (truebjet_eff->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_trueb[jjj] = iii;
-                if (truecjet_eff->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_truec[jjj] = iii;
-                if (lightjet_eff->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_truelight[jjj] = iii;
-
-                if (truebjet_eff_med->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_med_trueb[jjj] = iii;
-                if (truecjet_eff_med->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_med_truec[jjj] = iii;
-                if (lightjet_eff_med->GetBinContent(iii,jjj) > 0) lastNonEmptyEFfMapPtBin_med_truelight[jjj] = iii;
-            }
-        }
-
 
       bTagEffMap_PtRange = lightjet_eff->GetXaxis()->GetXmax();
       bTagEffMap_Eta_high = lightjet_eff->GetYaxis()->GetXmax();
@@ -906,7 +706,7 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    tree->Branch("passesPFHT", &passesPFHT  , "passesPFHT/O");
    tree->Branch("passesPFJet", &passesPFJet  , "passesPFJet/O");
 
-      // LEPTON INFORMATION
+       // LEPTON INFORMATION
    tree->Branch("nMuons_looseID_looseIso", &nMuons_looseID_looseIso, "nMuons_looseID_looseIso/I");
    tree->Branch("nMuons_medID_looseIso", &nMuons_medID_looseIso, "nMuons_medID_looseIso/I");
    tree->Branch("nMuons_looseID_medIso", &nMuons_looseID_medIso, "nMuons_looseID_medIso/I");
@@ -919,54 +719,38 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    tree->Branch("nTau_VLooseVsJet_VLooseVsMuon_VVLooseVse", &nTau_VLooseVsJet_VLooseVsMuon_VVLooseVse, "nTau_VLooseVsJet_VLooseVsMuon_VVLooseVse/I");
    tree->Branch("nTau_VVLlooseVsJet_VLooseVsMuon_VVLooseVse", &nTau_VVLlooseVsJet_VLooseVsMuon_VVLooseVse, "nTau_VVLlooseVsJet_VLooseVsMuon_VVLooseVse/I");
 
+
    tree->Branch("nfatjets", &nfatjets, "nfatjets/I");
 
    tree->Branch("nAK4", &nAK4, "nAK4/I");
-    tree->Branch("AK4_pt", AK4_pt, "AK4_pt[nAK4]/D");
-    tree->Branch("AK4_px", AK4_px, "AK4_px[nAK4]/D");
-    tree->Branch("AK4_py", AK4_py, "AK4_py[nAK4]/D");
-    tree->Branch("AK4_pz", AK4_pz, "AK4_pz[nAK4]/D");
-    tree->Branch("AK4_E",  AK4_E,  "AK4_E[nAK4]/D");
-    tree->Branch("AK4_eta", AK4_eta , "AK4_eta[nAK4]/D");
-    tree->Branch("AK4_phi", AK4_phi , "AK4_phi[nAK4]/D");
-    tree->Branch("AK4_mass", AK4_mass, "AK4_mass[nAK4]/D");
    tree->Branch("AK4_DeepJet_disc", AK4_DeepJet_disc, "AK4_DeepJet_disc[nAK4]/D");
-   tree->Branch("AK4_fails_veto_map", AK4_fails_veto_map , "AK4_fails_veto_map[nAK4]/O");
-
-    tree->Branch("passesJetPUID", passesJetPUID, "passesJetPUID[nAK4]/O");
-    tree->Branch("AK4_jec_full", AK4_jec_full, "AK4_jec_full[nAK4]/D");
 
    tree->Branch("nSuperJets", &nSuperJets, "nSuperJets/I");
    tree->Branch("tot_nAK4_50", &tot_nAK4_50, "tot_nAK4_50/I");             //total #AK4 jets (E>50 GeV) for BOTH superjets
    tree->Branch("tot_nAK4_70", &tot_nAK4_70, "tot_nAK4_70/I");
    tree->Branch("diSuperJet_mass",&diSuperJet_mass, "diSuperJet_mass/D");
    tree->Branch("diSuperJet_mass_100",&diSuperJet_mass_100, "diSuperJet_mass_100/D");
-   tree->Branch("diSuperJet_mass_300",&diSuperJet_mass_300, "diSuperJet_mass_300/D");
    tree->Branch("nfatjet_pre",&nfatjet_pre, "nfatjet_pre/I");
    tree->Branch("totHT",&totHT, "totHT/D");
    
    tree->Branch("jet_pt", jet_pt, "jet_pt[nfatjets]/D");
-   tree->Branch("jet_px", jet_px, "jet_px[nfatjets]/D");
-    tree->Branch("jet_py", jet_py, "jet_py[nfatjets]/D");
-    tree->Branch("jet_pz", jet_pz, "jet_pz[nfatjets]/D");
-     tree->Branch("jet_E",  jet_E,  "jet_E[nfatjets]/D");
    tree->Branch("jet_eta", jet_eta, "jet_eta[nfatjets]/D");
    tree->Branch("jet_phi", jet_phi, "jet_phi[nfatjets]/D");
-   tree->Branch("jet_mass", jet_mass, "jet_mass[nfatjets]/D");
-    tree->Branch("jet_SD_mass", jet_SD_mass, "jet_SD_mass[nfatjets]/D");
    tree->Branch("AK8_fails_veto_map", AK8_fails_veto_map, "AK8_fails_veto_map[nfatjets]/O");
 
    tree->Branch("fatjet_isHEM", fatjet_isHEM, "fatjet_isHEM[nfatjets]/O");
    tree->Branch("jet_pre_isHEM", jet_pre_isHEM, "jet_pre_isHEM[nfatjet_pre]/O");
 
    tree->Branch("jet_isHEM", jet_isHEM, "jet_isHEM[nAK4]/O");
-   tree->Branch("jet_jec_full", jet_jec_full, "jet_jec_full[nfatjets]/D");
-    tree->Branch("jet_pt_gen", jet_pt_gen, "jet_pt_gen[nfatjets]/D");
 
    tree->Branch("lab_nAK4", &lab_nAK4, "lab_nAK4/I");
    tree->Branch("lab_AK4_pt", lab_AK4_pt, "lab_AK4_pt[lab_nAK4]/D");
-  
+   tree->Branch("AK4_eta", AK4_eta  , "AK4_eta[lab_nAK4]/D");
+   tree->Branch("AK4_phi", AK4_phi  , "AK4_phi[lab_nAK4]/D");
+   tree->Branch("AK4_fails_veto_map", AK4_fails_veto_map  , "AK4_fails_veto_map[lab_nAK4]/O");
 
+   tree->Branch("jet_mass", jet_mass, "jet_mass[nfatjets]/D");
+   tree->Branch("AK4_mass", AK4_mass, "AK4_mass[nAK4]/D");
 
    tree->Branch("dijetMassOne", &dijetMassOne, "dijetMassOne/D");
    tree->Branch("dijetMassTwo", &dijetMassTwo, "dijetMassTwo/D");
@@ -980,7 +764,7 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    tree->Branch("SJ_nAK4_300", SJ_nAK4_300, "SJ_nAK4_300[nSuperJets]/I");
    tree->Branch("SJ_nAK4_400", SJ_nAK4_400, "SJ_nAK4_400[nSuperJets]/I");
 
-   
+   tree->Branch("passesJetPUID", passesJetPUID, "passesJetPUID[nAK4]/O");
 
 
     /////////// (2) Add grid variables here ///////////
@@ -1086,13 +870,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
    tree->Branch("fourAK8JetMass", &fourAK8JetMass  , "fourAK8JetMass/D");
 
    tree->Branch("eventNumber", &eventNumber  , "eventNumber/I");
-   // SJ COM jet vs lab frame jet mass comparisons
-    tree->Branch("nMPP_CA8_jets", &nMPP_CA8_jets, "nMPP_CA8_jets/I"); 
-    tree->Branch("smallestNJets", &smallestNJets, "smallestNJets/I"); 
-    tree->Branch("MPP_CA8_mass", MPP_CA8_mass, "MPP_CA8_mass[nMPP_CA8_jets]/D");
-    tree->Branch("MPP_CA8_pt", MPP_CA8_pt, "MPP_CA8_pt[nMPP_CA8_jets]/D");
-    tree->Branch("jet_pt_perc_diff", jet_pt_perc_diff, "jet_pt_perc_diff[smallestNJets]/D");
-    tree->Branch("jet_mass_perc_diff", jet_mass_perc_diff, "jet_mass_perc_diff[smallestNJets]/D");
 
    if(_verbose)std::cout << "Initialized base (non-includeAllBranches) variables." << std::endl;
 
@@ -1110,88 +887,17 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       tree->Branch("SJ_mass_800", SJ_mass_800, "SJ_mass_800[nSuperJets]/D");
       tree->Branch("SJ_mass_1000", SJ_mass_1000, "SJ_mass_1000[nSuperJets]/D");
       tree->Branch("leadAK8_mass",leadAK8_mass, "leadAK8_mass[nfatjets]/D");
-       tree->Branch("SJ_nAK4_10", SJ_nAK4_10, "SJ_nAK4_10[nSuperJets]/I");
-        tree->Branch("SJ_nAK4_25", SJ_nAK4_25, "SJ_nAK4_25[nSuperJets]/I");
-        tree->Branch("SJ_nAK4_70", SJ_nAK4_70, "SJ_nAK4_70[nSuperJets]/I");
-        tree->Branch("SJ_nAK4_125", SJ_nAK4_125, "SJ_nAK4_125[nSuperJets]/I");
-        tree->Branch("SJ_mass_70", SJ_mass_70, "SJ_mass_70[nSuperJets]/D");
-        tree->Branch("SJ_mass_125", SJ_mass_125, "SJ_mass_125[nSuperJets]/D");
-      tree->Branch("jet_nParts_by_mass", jet_nParts_by_mass, "jet_nParts_by_mass[nfatjets]/I");
-        tree->Branch("nParts_perc_diff", nParts_perc_diff, "nParts_perc_diff[smallestNJets]/D");
-        tree->Branch("NJetMass", &NJetMass, "NJetMass/D");
-        tree->Branch("diSJ_mass_perc_diff", &diSJ_mass_perc_diff, "diSJ_mass_perc_diff/D");
-        tree->Branch("NJetPt", &NJetPt, "NJetPt/D");
-        tree->Branch("diSuperJet_Pt", &diSuperJet_Pt, "diSuperJet_Pt/D");
-        tree->Branch("diSJ_Pt_perc_diff", &diSJ_Pt_perc_diff, "diSJ_Pt_perc_diff/D");
 
-        //////// BES variables (not actually necessary to save here)
+      //////// BES variables (not actually necessary to save here)
 
-        tree->Branch("CA4_E", CA4_E, "CA4_E[tot_mpp_AK4]/D");
-        tree->Branch("AK41_E_tree",AK41_E_tree , "AK41_E_tree[nSuperJets]/D");
-        tree->Branch("AK42_E_tree",AK42_E_tree , "AK42_E_tree[nSuperJets]/D");
-        tree->Branch("AK43_E_tree",AK43_E_tree , "AK43_E_tree[nSuperJets]/D");
-        tree->Branch("AK44_E_tree",AK44_E_tree , "AK44_E_tree[nSuperJets]/D");
-
-        tree->Branch("AK4_theta12",AK4_theta12 , "AK4_theta12[nSuperJets]/D");
-        tree->Branch("AK4_theta13",AK4_theta13,    "AK4_theta13[nSuperJets]/D");
-        tree->Branch("AK4_theta14", AK4_theta14, "AK4_theta14[nSuperJets]/D");
-        tree->Branch("AK4_theta23",AK4_theta23 , "AK4_theta23[nSuperJets]/D");
-        tree->Branch("AK4_theta24",AK4_theta24 , "AK4_theta24[nSuperJets]/D");
-        tree->Branch("AK4_theta34", AK4_theta34, "AK4_theta34[nSuperJets]/D");
-
-
-        // nHeavyAK8 versions (can be calculated locally)
-        /*tree->Branch("nHeavyAK8_pt400_M10", &nHeavyAK8_pt400_M10, "nHeavyAK8_pt400_M10/I");
-        tree->Branch("nHeavyAK8_pt400_M20", &nHeavyAK8_pt400_M20, "nHeavyAK8_pt400_M20/I");
-        tree->Branch("nHeavyAK8_pt400_M30", &nHeavyAK8_pt400_M30, "nHeavyAK8_pt400_M30/I");
-        tree->Branch("nHeavyAK8_pt400_M45", &nHeavyAK8_pt400_M45, "nHeavyAK8_pt400_M45/I");
-        tree->Branch("nHeavyAK8_pt300_M10", &nHeavyAK8_pt300_M10, "nHeavyAK8_pt300_M10/I");
-        tree->Branch("nHeavyAK8_pt300_M20", &nHeavyAK8_pt300_M20, "nHeavyAK8_pt300_M20/I");
-        tree->Branch("nHeavyAK8_pt300_M30", &nHeavyAK8_pt300_M30, "nHeavyAK8_pt300_M30/I");
-        tree->Branch("nHeavyAK8_pt300_M45", &nHeavyAK8_pt300_M45, "nHeavyAK8_pt300_M45/I");
-        tree->Branch("nHeavyAK8_pt200_M10", &nHeavyAK8_pt200_M10, "nHeavyAK8_pt200_M10/I");
-        tree->Branch("nHeavyAK8_pt200_M20", &nHeavyAK8_pt200_M20, "nHeavyAK8_pt200_M20/I");
-        tree->Branch("nHeavyAK8_pt200_M30", &nHeavyAK8_pt200_M30, "nHeavyAK8_pt200_M30/I");
-        tree->Branch("nHeavyAK8_pt200_M45", &nHeavyAK8_pt200_M45, "nHeavyAK8_pt200_M45/I");*/
-
-        tree->Branch("AK41_ndaughters",AK41_ndaughters , "AK41_ndaughters[nSuperJets]/I");
-        tree->Branch("AK41_nsubjets", AK41_nsubjets, "AK41_nsubjets[nSuperJets]/I");
-        tree->Branch("AK41_thrust", AK41_thrust, "AK41_thrust[nSuperJets]/D");
-        tree->Branch("AK41_sphericity", AK41_sphericity, "AK41_sphericity[nSuperJets]/D");
-        tree->Branch("AK41_asymmetry",AK41_asymmetry , "AK41_asymmetry[nSuperJets]/D");
-        tree->Branch("AK41_isotropy",AK41_isotropy , "AK41_isotropy[nSuperJets]/D");
-        tree->Branch("AK41_aplanarity", AK41_aplanarity, "AK41_aplanarity[nSuperJets]/D");
-        tree->Branch("AK41_FW1", AK41_FW1, "AK41_FW1[nSuperJets]/D");
-        tree->Branch("AK41_FW2", AK41_FW2, "AK41_FW2[nSuperJets]/D");
-        tree->Branch("AK41_FW3", AK41_FW3, "AK41_FW3[nSuperJets]/D");
-        tree->Branch("AK41_FW4", AK41_FW4, "AK41_FW4[nSuperJets]/D");
-
-        tree->Branch("SJ_thrust", SJ_thrust, "SJ_thrust[nSuperJets]/D");
-        tree->Branch("SJ_sphericity", SJ_sphericity, "SJ_sphericity[nSuperJets]/D");
-        tree->Branch("SJ_asymmetry", SJ_asymmetry, "SJ_asymmetry[nSuperJets]/D");
-        tree->Branch("SJ_isotropy", SJ_isotropy, "SJ_isotropy[nSuperJets]/D");
-        tree->Branch("SJ_aplanarity", SJ_aplanarity, "SJ_aplanarity[nSuperJets]/D");
-        tree->Branch("SJ_FW1", SJ_FW1, "SJ_FW1[nSuperJets]/D");
-        tree->Branch("SJ_FW2", SJ_FW2, "SJ_FW2[nSuperJets]/D");
-        tree->Branch("SJ_FW3", SJ_FW3, "SJ_FW3[nSuperJets]/D");
-        tree->Branch("SJ_FW4", SJ_FW4, "SJ_FW4[nSuperJets]/D");
-        tree->Branch("AK42_ndaughters",AK42_ndaughters , "AK42_ndaughters[nSuperJets]/I");
-        tree->Branch("AK42_nsubjets", AK42_nsubjets, "AK42_nsubjets[nSuperJets]/I");
+      
 
       tree->Branch("nAK4_uncut", &nAK4_uncut, "nAK4_uncut/I");
       //tree->Branch("btag_score_uncut", btag_score_uncut, "btag_score_uncut[nAK4_uncut]/D");
       tree->Branch("AK4_ptot", AK4_ptot  , "AK4_ptot[lab_nAK4]/D");
 
       if(_verbose)std::cout << "Initialized  includeAllBranches variables." << std::endl;
-      if( (runType.find("MC") != std::string::npos) || (runType.find("Suu") != std::string::npos))    //don't want these variables for data
-        {
-         tree->Branch("AK8_SJ_assignment", AK8_SJ_assignment  , "AK8_SJ_assignment[nfatjets]/I");    // which superjet (1 or 0) was an AK8 jet assigned to
-         tree->Branch("AK4_SJ_assignment", AK4_SJ_assignment  , "AK4_SJ_assignment[nfatjets]/I"); // which superjet (1 or 0) was an AK4 jet assigned to (based off the AK8 jet it was inside)
 
-         tree->Branch("AK8_is_near_highE_CA4", AK8_is_near_highE_CA4 , "AK8_is_near_highE_CA4[nfatjets]/O");  // which superjet (1 or 0) was an AK8 jet assigned to
-         tree->Branch("lab_AK4_AK8_parent", lab_AK4_AK8_parent , "lab_AK4_AK8_parent[nAK4]/I");       //    the nfatjet index of of the AK8 jet in which selected AK4 jets reside
-         tree->Branch("AK4_is_near_highE_CA4", AK4_is_near_highE_CA4 , "AK4_is_near_highE_CA4[nAK4]/O");    // which superjet (1 or 0) was an AK8 jet assigned to
-        }
    }
 
    if( (runType.find("MC") != std::string::npos) || (runType.find("Suu") != std::string::npos))    //don't want these variables for data
@@ -1206,12 +912,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
 
       if(doTopPtReweight) tree->Branch("top_pt_weight", &top_pt_weight, "top_pt_weight/D");
       tree->Branch("AK8_JER", AK8_JER  , "AK8_JER[nfatjets]/D");
-      if( runType.find("Suu") != std::string::npos) 
-        {
-            // chi pt dist
-            tree->Branch("nChis", &nChis  , "nChis/I");
-            tree->Branch("chi_pt", chi_pt  , "chi_pt[nChis]/D");
-        }
 
       tree->Branch("nTrue_b_AK4", &nTrue_b_AK4  , "nTrue_b_AK4/I");
       tree->Branch("nTrue_c_AK4", &nTrue_c_AK4  , "nTrue_c_AK4/I");
@@ -1228,46 +928,11 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
       tree->Branch("bTag_eventWeight_T_nom", &bTag_eventWeight_T_nom  , "bTag_eventWeight_T_nom/D");  /// tight WP event weight
       tree->Branch("bTag_eventWeight_M_nom", &bTag_eventWeight_M_nom  , "bTag_eventWeight_M_nom/D");  /// med WP event weight
 
-     if(doPUSF)
-        {
-            tree->Branch("PU_eventWeight_nom", &PU_eventWeight_nom, "PU_eventWeight_nom/D");
-            tree->Branch("ntrueInt", &ntrueInt , "ntrueInt/I");
-        }
+      if(doPUSF)  tree->Branch("PU_eventWeight_nom", &PU_eventWeight_nom, "PU_eventWeight_nom/D");
 
       if (systematicType == "nom") // don't need these saved for other systematic types
       {
          if(_verbose)std::cout << "Setting up nom uncertainty-specific variables (event weights)" << std::endl;
-
-         if((doPDFWeights) || (runType.find("QCD") != std::string::npos  && systematicType == "nom"))
-            {
-
-               if(pdfSetType == "relic")
-               {
-                  nomPDF      = LHAPDF::mkPDF(pdfname.c_str(),0); //Nominal PDF , previously took this as an input: LHAPDF_NOM
-                  if(_verbose) std::cout << "Loaded the replica nominal PDF." << std::endl;
-                  for (int i = 0; i < nVars; i++)
-                  {
-                     varPDFs[i]      = LHAPDF::mkPDF(pdfname.c_str(),i); // previously was LHAPDF::mkPDF(LHAPDF_VAR_LOW + i);
-                  } 
-                  if(_verbose) std::cout << "Loaded the replica variation PDFs." << std::endl;
-
-               }
-               else if(pdfSetType == "hessian")
-               {
-                  nomPDF = LHAPDF::mkPDF(pdfname_hess.c_str(),0); //Nominal PDF , previously took this as an input: LHAPDF_NOM
-                  if(_verbose) std::cout << "Loaded the hessian nominal PDF." << std::endl;
-
-                    for (int i = 0; i< nVars; i++)
-                    {
-                        varPDFs_hess[i] = LHAPDF::mkPDF(pdfname_hess.c_str(),i);
-                    }
-                    if(_verbose) std::cout << "Loaded the hessian variation PDFs." << std::endl;
-                }
-                else
-                {
-                    std::cout << "ERROR: PDF type " << pdfSetType << " not recognized. "  << std::endl;
-                }
-            }
 
          if(doPUSF)
          {
@@ -1314,64 +979,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
             tree->Branch("bTag_eventWeight_light_M_corr_down", &bTag_eventWeight_light_M_corr_down  , "bTag_eventWeight_light_M_corr_down/D");
 
          }
-
-         if( (doPDFWeights) || (runType.find("QCD") != std::string::npos  && systematicType == "nom"))
-            {
-
-                tree->Branch("id1", &id1, "id1/I");
-                tree->Branch("id2", &id2, "id2/I");
-                tree->Branch("x1", &x1, "x1/D");
-                tree->Branch("x2", &x2, "x2/D");
-                tree->Branch("q2", &q2, "q2/D");    
-
-                tree->Branch("factWeights_up",    &factWeights_up, "factWeights_up/D");
-                tree->Branch("factWeights_down",   &factWeights_down, "factWeights_down/D");
-
-                //tree->Branch("renormWeight_nQCD1_up",  &renormWeight_nQCD1_up, "renormWeight_nQCD1_up/D");
-                //tree->Branch("renormWeight_nQCD1_down",    &renormWeight_nQCD1_down, "renormWeight_nQCD1_down/D");
-
-                tree->Branch("renormWeight_nQCD2_up",  &renormWeight_nQCD2_up, "renormWeight_nQCD2_up/D");
-                tree->Branch("renormWeight_nQCD2_down",    &renormWeight_nQCD2_down, "renormWeight_nQCD2_down/D");
-
-                /*
-                tree->Branch("renormWeight_nQCD3_up",  &renormWeight_nQCD3_up, "renormWeight_nQCD3_up/D");
-                tree->Branch("renormWeight_nQCD3_down",    &renormWeight_nQCD3_down, "renormWeight_nQCD3_down/D");
-
-
-                tree->Branch("renormWeight_nQCD4_up",  &renormWeight_nQCD4_up, "renormWeight_nQCD4_up/D");
-                tree->Branch("renormWeight_nQCD4_down",    &renormWeight_nQCD4_down, "renormWeight_nQCD4_down/D");
-
-                tree->Branch("renormWeight_nQCD5_up",  &renormWeight_nQCD5_up, "renormWeight_nQCD5_up/D");
-                tree->Branch("renormWeight_nQCD5_down",    &renormWeight_nQCD5_down, "renormWeight_nQCD5_down/D"); */
-
-                tree->Branch("scale_uncert_envelope_nQCD1_up", &scale_uncert_envelope_nQCD1_up, "scale_uncert_envelope_nQCD1_up/D");
-                tree->Branch("scale_uncert_envelope_nQCD1_down", &scale_uncert_envelope_nQCD1_down, "scale_uncert_envelope_nQCD1_down/D");
-
-                tree->Branch("scale_uncert_envelope_nQCD2_up", &scale_uncert_envelope_nQCD2_up, "scale_uncert_envelope_nQCD2_up/D");
-                tree->Branch("scale_uncert_envelope_nQCD2_down", &scale_uncert_envelope_nQCD2_down, "scale_uncert_envelope_nQCD2_down/D");
-
-                tree->Branch("scale_uncert_envelope_nQCD3_up", &scale_uncert_envelope_nQCD3_up, "scale_uncert_envelope_nQCD3_up/D");
-                tree->Branch("scale_uncert_envelope_nQCD3_down", &scale_uncert_envelope_nQCD3_down, "scale_uncert_envelope_nQCD3_down/D");
-
-
-                if(pdfSetType == "relic")
-                {
-                    tree->Branch("PDFWeight_68perc_up", &PDFWeight_68perc_up, "PDFWeight_68perc_up/D");
-                    tree->Branch("PDFWeight_68perc_down", &PDFWeight_68perc_down, "PDFWeight_68perc_down/D");
-
-                    tree->Branch("PDFWeight_RMS_up", &PDFWeight_RMS_up, "PDFWeight_RMS_up/D");
-                    tree->Branch("PDFWeight_RMS_down", &PDFWeight_RMS_down, "PDFWeight_RMS_down/D");
-                }
-                else if(pdfSetType == "hessian")
-                {
-                    // for Hessian method (from LHAPDF)
-                    tree->Branch("nPDFWeights_hess", &nPDFWeights_hess    , "nPDFWeights_hess/I");
-                    tree->Branch("PDFWeights_hess", PDFWeights_hess    , "PDFWeights_hess[nPDFWeights_hess]/D");
-                    h_PDFWeights_hess = fs->make<TH1F>("h_PDFWeights_hess", "h_PDFWeights_hess", 101, 0, 101); 
-                }
-
-
-            }
          if(doPDFWeights)
          {
             tree->Branch("PDFWeights_renormWeight_up",     &PDFWeights_renormWeight_up, "PDFWeights_renormWeight_up/D");
@@ -1392,16 +999,6 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
             tree->Branch("QCDRenormalization_down_BEST", &QCDRenormalization_down_BEST, "QCDRenormalization_down_BEST/D");
 
             tree->Branch("scale_envelope", scale_envelope, "scale_envelope[10]/D");
-            tree->Branch("PDFWeights_envelope_scale_uncertainty_up", &PDFWeights_envelope_scale_uncertainty_up, "PDFWeights_envelope_scale_uncertainty_up/D");
-            tree->Branch("PDFWeights_envelope_scale_uncertainty_down", &PDFWeights_envelope_scale_uncertainty_down, "PDFWeights_envelope_scale_uncertainty_down/D");
-
-
-            if(pdfSetType == "relic")
-               {
-                  /// PDF weights as calculated by LHEEventWeight product
-                  tree->Branch("PDFWeightUp_replica", &PDFWeightUp_replica, "PDFWeightUp_replica/D");
-                  tree->Branch("PDFWeightDown_replica", &PDFWeightDown_replica, "PDFWeightDown_replica/D");
-               }
             // above: scale_envelope = all the envelope variations from the pdf as written in https://twiki.cern.ch/twiki/bin/viewauth/CMS/TopSystematics#Factorization_and_renormalizatio
             // index 0: muF = 2.0, muR = 1.0
             // index 1: muF = 0.5, muR = 1.0
@@ -1425,7 +1022,12 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
 
       }
 
-      
+      tree->Branch("nGenBJets_AK4", nGenBJets_AK4, "nGenBJets_AK4[lab_nAK4]/I");
+      tree->Branch("AK4_partonFlavour", AK4_partonFlavour, "AK4_partonFlavour[lab_nAK4]/I");
+      tree->Branch("AK4_hadronFlavour", AK4_hadronFlavour, "AK4_hadronFlavour[lab_nAK4]/I");
+
+      tree->Branch("AK8_hadronFlavour", AK8_hadronFlavour, "AK8_hadronFlavour[nfatjets]/D");
+      tree->Branch("AK8_partonFlavour", AK8_partonFlavour, "AK8_partonFlavour[nfatjets]/D");
 
       if(doPUSF)tree->Branch("ntrueInt", &ntrueInt  , "ntrueInt/I");
 
@@ -1451,17 +1053,11 @@ clusteringAnalyzerAll_300::clusteringAnalyzerAll_300(const edm::ParameterSet& iC
          // tree->Branch("PDFWeights_varWeightsRMS", &varWeightsRMS, "PDFWeights_varWeightsRMS/D");
          // tree->Branch("PDFWeights_varWeightsErr", &varWeightsErr, "PDFWeights_varWeightsErr/D");
       }
-     tree->Branch("nGenBJets_AK4", nGenBJets_AK4, "nGenBJets_AK4[nAK4]/I");
-         tree->Branch("AK4_partonFlavour", AK4_partonFlavour, "AK4_partonFlavour[nAK4]/I");
-         tree->Branch("AK4_hadronFlavour", AK4_hadronFlavour, "AK4_hadronFlavour[nAK4]/I");
-         tree->Branch("AK8_hadronFlavour", AK8_hadronFlavour, "AK8_hadronFlavour[nfatjets]/D");
-         tree->Branch("AK8_partonFlavour", AK8_partonFlavour, "AK8_partonFlavour[nfatjets]/D");
-
       if(_verbose)std::cout << "Finished setting up MC-specific stuff (genParts tokens, MC-specific TTree vars)" << std::endl;
 
 
    }
-   else if(runType.find("data") != std::string::npos)
+   else if(runType == "Data")
    {
          std::cout <<"Running as data ..." << std::endl;
    }
@@ -1481,147 +1077,76 @@ const reco::Candidate* clusteringAnalyzerAll_300::parse_chain(const reco::Candid
 }
 
 
-std::string clusteringAnalyzerAll_300::returnJECFile(std::string year, std::string systematicType, std::string jet_type, std::string runType, bool isAK4PFPuppi = false)
+//// return back the JEC file for a given systematic, year, and jet type
+std::string clusteringAnalyzerAll_300::returnJECFile(std::string year, std::string systematicType, std::string jet_type, std::string runType)
 {
-    std::string data_type = "MC";
-    std::string jet_str = "AK8PFPuppi";
-    if (jet_type == "AK4")
-    { 
-        if(isAK4PFPuppi) jet_str = "AK4PFPuppi";
-        else{ jet_str = "AK4PFchs"; }
-    }
+   std::string data_type = "MC";
+   std::string jet_str  = "AK8PFPuppi";
+   if (jet_type == "AK4"){ jet_str = "AK4PFchs";}
+   if ((runType.find("data") != std::string::npos) )
+   {
+      if(year == "2015")
+      {
+         if( (runType.find("dataE") != std::string::npos) || (runType.find("dataF") != std::string::npos)  ) data_type = "dataEF";
+         else {  data_type = "dataBCD";}
+      }
+      if(year == "2016")       data_type = "dataFGH";
+      else if (year == "2017") data_type = runType;
+      else if (year == "2018") data_type = runType;
 
+   }  
+   // Summer19UL16APV_V9_MC/RegroupedV2_Summer19UL16APV_V9_MC_UncertaintySources_AK4PFchs.txt
+   if (data_type.find("data") != std::string::npos ) return  ("data/JEC_uncertainty_sources/" + file_map[year][data_type] + "/" + file_map[year][data_type] + "_UncertaintySources_" +jet_str  + ".txt" ).c_str();
 
-    if ((runType.find("data") != std::string::npos) )
-    {
-        if(year == "2015")
-        {
-            if( (runType.find("dataE") != std::string::npos) || (runType.find("dataF") != std::string::npos)  ) data_type = "dataEF";
-            else {  data_type = "dataBCD";}
-        }
-        if(year == "2016")       data_type = "dataFGH";
-        else if (year == "2017") data_type = runType;
-        else if (year == "2018") data_type = runType;
-
-    } 
-
-    std::string year_str = "2016";
-    if      (year == "2017") year_str = "2017";
-    else if (year == "2018") year_str = "2018";
-    // Summer19UL16APV_V9_MC/RegroupedV2_Summer19UL16APV_V9_MC_UncertaintySources_AK4PFchs.txt
-    
-    // OLD WAY
-    //if (data_type.find("data") != std::string::npos ) return ("data/JEC_uncertainty_sources/" + file_map[year][data_type] + "/" + file_map[year][data_type] + "_UncertaintySources_" +jet_str    + ".txt" ).c_str();
-    //else { return ("data/JEC_uncertainty_sources/" + file_map[year][data_type] + "/" + file_map[year][data_type] + "_UncertaintySources_" +jet_str + ".txt" ).c_str(); }
-
-
-    if (data_type.find("data") != std::string::npos ) return ("data/JEC_uncertainty_sources/" + year_str + "_UL/" + file_map[year][data_type] + "_UncertaintySources_" +jet_str    + ".txt" ).c_str();
-    else { return ("data/JEC_uncertainty_sources/" + year_str + "_UL/" + file_map[year][data_type]  + "_UncertaintySources_" +jet_str + ".txt" ).c_str(); }
-
-
+   else { return  ("data/JEC_uncertainty_sources/" + file_map[year][data_type] + "/" + file_map[year][data_type] + "_UncertaintySources_" +jet_str  + ".txt" ).c_str(); }
 
 }
-
-// returns the file paths to the AK4 PUPPI JES corrections (one for each step)
-std::vector<edm::FileInPath> clusteringAnalyzerAll_300::get_AK4_JEC_paths(std::string year, std::string runType)
-{
-    bool isData = false;
-    if(runType.find("data") != std::string::npos) isData = true;
-
-    std::string data_type = "MC";
-    if (isData)
-    {
-        if(year == "2015")
-        {
-            if( (runType.find("dataE") != std::string::npos) || (runType.find("dataF") != std::string::npos)  ) data_type = "dataEF";
-            else {  data_type = "dataBCD";}
-        }
-        if(year == "2016")       data_type = "dataFGH";
-        else if (year == "2017") data_type = runType;
-        else if (year == "2018") data_type = runType;
-
-    } 
-
-    std::string year_str = "2016";
-    if      (year == "2017") year_str = "2017";
-    else if (year == "2018") year_str = "2018";
-
-    std::string JEC_dir = "data/JEC_corrs/" + year_str + "_UL/";
-
-
-    std::vector<edm::FileInPath> AK4_JEC_paths_;
-    std::vector<std::string> corr_steps = {"L1FastJet", "L2Relative","L3Absolute"};
-    if(isData) corr_steps.push_back("L2L3Residual");
-
-
-
-    for(auto corr_step: corr_steps)
-    {
-        edm::FileInPath AK4_JEC_path =  edm::FileInPath((JEC_dir +  file_map[year][data_type] +"_" + corr_step +  "_AK4PFPuppi.txt").c_str());
-        AK4_JEC_paths_.push_back(AK4_JEC_path);
-    }
-
-    return AK4_JEC_paths_;
-}
-
-
-
 
 /// returns the JEC uncertainty scale factor (from a specific, reduced source) for a given jet with pt, eta
-double clusteringAnalyzerAll_300::getJECUncertaintyFromSources(std::string jet_type, double pt, double eta, bool isAK4PFPuppi = false)
+double clusteringAnalyzerAll_300::getJECUncertaintyFromSources(std::string jet_type, double pt, double eta)
 {  
 
-    if(_verbose)std::cout << "----------------------------- new jet --------------------------------- " << std::endl;
-    if(_verbose)std::cout << "Reduced uncertainty is " << systematicType << std::endl;
+   if(_verbose)std::cout << "----------------------------- new jet --------------------------------- " << std::endl;
+   if(_verbose)std::cout << "Reduced uncertainty is " << systematicType << std::endl;
 
-    if(_verbose)std::cout << "There are " << uncertainty_sources.size() << " uncertainties." << std::endl;
-    double uncert = 0.0;
-    int uncertainty_number = 0;
-    std::string uncertainty_names = "";
-    for(auto uncert_source = uncertainty_sources.begin(); uncert_source!=uncertainty_sources.end();uncert_source++)
-    {
-        /// get the uncertainty from the JetCorrector object
-        double AK4_JEC_uncertainty = -999;
-        if(_verbose)std::cout << "Uncertainty number " << uncertainty_number << ". The uncertainty source is " << *uncert_source << std::endl;
+   if(_verbose)std::cout << "There are " << uncertainty_sources.size() << " uncertainties." << std::endl;
+   double uncert = 0.0;
+   int uncertainty_number = 0;
+   std::string uncertainty_names = "";
+   for(auto uncert_source = uncertainty_sources.begin(); uncert_source!=uncertainty_sources.end();uncert_source++)
+   {
+      /// get the uncertainty from the JetCorrector object
+      double AK4_JEC_uncertainty;
+      if(_verbose)std::cout << "Uncertainty number " << uncertainty_number << ". The uncertainty source is " << *uncert_source << std::endl;
 
-        if( jet_type == "AK4")
-        {  
-            if(_verbose)std::cout << "For AK4: Trying to access source " << *uncert_source << std::endl;
+      if( jet_type == "AK4")
+      {  
 
-            if(isAK4PFPuppi)
-            {
-                JEC_map_AK4PFPuppi[*uncert_source]->setJetEta(eta );
-                JEC_map_AK4PFPuppi[*uncert_source]->setJetPt( pt );
-                AK4_JEC_uncertainty = fabs(JEC_map_AK4PFPuppi[*uncert_source]->getUncertainty(true));
-            }
-            else
-            {
-                JEC_map_AK4[*uncert_source]->setJetEta(eta );
-                JEC_map_AK4[*uncert_source]->setJetPt( pt ); 
-                AK4_JEC_uncertainty = fabs(JEC_map_AK4[*uncert_source]->getUncertainty(true));
-           
-            }
+         if(_verbose)std::cout << "For AK8: Trying to access source " << *uncert_source << std::endl;
+         JEC_map_AK4[*uncert_source]->setJetEta(eta );
+         JEC_map_AK4[*uncert_source]->setJetPt( pt );
+         AK4_JEC_uncertainty = fabs(JEC_map_AK4[*uncert_source]->getUncertainty(true));
+         if(_verbose)std::cout << "Source: " << *uncert_source << ", value:  " << AK4_JEC_uncertainty << std::endl;
+         uncert+=AK4_JEC_uncertainty;
+         uncertainty_names += (*uncert_source + " ");
+      }
+      else if(jet_type == "AK8")
+      {
 
-            if(_verbose)std::cout << "Source: " << *uncert_source << ", value:  " << AK4_JEC_uncertainty << std::endl;
-            uncert+= pow(AK4_JEC_uncertainty,2);
-            uncertainty_names += (*uncert_source + " ");
-        }
-        else if(jet_type == "AK8")
-        {
-            if(_verbose)std::cout << "For AK8: Trying to access source " << *uncert_source << std::endl;
-            JEC_map_AK8[*uncert_source]->setJetEta( eta );
-            JEC_map_AK8[*uncert_source]->setJetPt( pt );
-            double AK8_JEC_uncertainty = fabs(JEC_map_AK8[*uncert_source]->getUncertainty(true));
-            if(_verbose)std::cout << "Source: " << *uncert_source << ", value:  " << AK8_JEC_uncertainty << std::endl;
-            ///    JEC DEBUGGINGstd::cout << "Main uncertainty is " << systematicType << ", Uncertainty source is " << *uncert_source << " and value is " << uncert << ". This is uncertainty number " << uncertainty_number<< std::endl;
-            uncert+= pow(AK8_JEC_uncertainty,2);  // assuming all sources are uncorrelated to each other, so WILL ADD IN QUADRATURE
-            uncertainty_names += (*uncert_source + ", ");
-        }
-        uncertainty_number++;
-    }
-    if(_verbose)std::cout << "Total uncertainty: " << sqrt(uncert) << " from uncertainties: " << uncertainty_names << "(" << uncertainty_number << " total sources)." << std::endl;
+         if(_verbose)std::cout << "For AK8: Trying to access source " << *uncert_source << std::endl;
+         JEC_map_AK8[*uncert_source]->setJetEta( eta );
+         JEC_map_AK8[*uncert_source]->setJetPt( pt );
+         double AK8_JEC_uncertainty = fabs(JEC_map_AK8[*uncert_source]->getUncertainty(true));
+         if(_verbose)std::cout << "Source: " << *uncert_source << ", value:  " << AK8_JEC_uncertainty << std::endl;
+          ///    JEC DEBUGGINGstd::cout << "Main uncertainty is " <<  systematicType << ", Uncertainty source is " << *uncert_source << " and value is " << uncert << ". This is uncertainty number " << uncertainty_number<< std::endl;
+         uncert+=AK8_JEC_uncertainty;
+         uncertainty_names += (*uncert_source + ", ");
+      }
+      uncertainty_number++;
+   }
+   if(_verbose)std::cout << "Total uncertainty: " << uncert << " from uncertainties: " << uncertainty_names << "(" << uncertainty_number << " total sources)."  << std::endl;
 
-    return sqrt(uncert); // sqrt because these are added in quadrature
+   return uncert;
 }  
 
 // return the JER scale factor for a given uncertainty source and jet eta
@@ -1649,43 +1174,26 @@ bool clusteringAnalyzerAll_300::isHEM(double jet_eta, double jet_phi)
 // bool corresponding to if AK4 jet passes tight ID
 bool clusteringAnalyzerAll_300::isgoodjet(double eta, double NHF,double NEMF, const size_t NumConst,double CHF,const int CHM, double MUF, double CEMF, double iJet_pt)
 {
+   if( (abs(eta) > 2.4)) return false; 
 
-    if(year == "2015" || year == "2016")
-    {
-        if( (abs(eta) > 2.4)) return false; 
-    }
-    else if(year =="2017" || year == "2018")
-    {
-        if( (abs(eta) >= 2.5)) return false; 
-    }
-    // apply the MEDIUM PU jet id https://twiki.cern.ch/twiki/bin/viewauth/CMS/PileupJetIDUL
-    //if( (!passesJetPUid) && (iJet_pt < 50.0)) return false; // jet PU ID is only relevant for AK4 jets with pt < 50 GeV
+   // apply the MEDIUM PU jet id https://twiki.cern.ch/twiki/bin/viewauth/CMS/PileupJetIDUL
+   //if( (!passesJetPUid) && (iJet_pt < 50.0)) return false; // jet PU ID is only relevant for AK4 jets with pt < 50 GeV
 
-    // apply the tight jet ID
-    if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
-    
+   // apply the tight jet ID
+   if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
+   
 
-    return true;
+   return true;
 
 }
 // checks AK8 jet (tight) ID and applies some eta conditions
 bool clusteringAnalyzerAll_300::isgoodjet(double eta, double NHF,double NEMF, const size_t NumConst,double CHF,const int CHM, double MUF, double CEMF, int nfatjets)
 {
-    
-    if(year == "2015" || year == "2016")
-    {
-        if ( (nfatjets < 2) && (abs(eta) > 2.4) ) return false;
-        else if ( (nfatjets >= 2) && (abs(eta) > 1.4) ) return false;
-    }
-    else if(year =="2017" || year == "2018")
-    {
-        if ( (nfatjets < 2) && (abs(eta) >= 2.5) ) return false;
-        else if ( (nfatjets >= 2) && (abs(eta) > 1.4) ) return false;
-    }
-    
+   if ( (nfatjets < 2) && (abs(eta) > 2.4) ) return false;
+   else if ( (nfatjets >= 2) && (abs(eta) > 1.4) ) return false;
 
-    if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
-    return true;
+   if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
+   return true;
 }
 // calculates the MPP frame given a TLorentzVector of SJ particles
 double clusteringAnalyzerAll_300::calcMPP(TLorentzVector superJetTLV )  
@@ -2629,19 +2137,11 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          {
 
             //std::cout << "trigname is " << trigname << std::endl;
-            if(year == "2015" || year == "2016")
-                {
-                    if(trigname == "HLT_PFJet450_v")     passesPFJet = true;
-                    else if(trigname == "HLT_PFHT900_v") passesPFHT = true;
-                }      
-                else if (year == "2017" || year == "2018") 
-                {
-                    if (trigname == "HLT_PFJet500_v")     passesPFJet = true;
-                    else if(trigname == "HLT_PFHT1050_v") passesPFHT = true;
-                }
+            if( ( trigname == "HLT_PFJet500_v") || (trigname == "HLT_PFJet450_v") ) passesPFJet = true;
+            else if( ( trigname == "HLT_PFHT900_v") || (trigname == "HLT_PFHT1050_v") ) passesPFHT = true;
 
-                if(debug)std::cout << "Found the " << *iT << " trigger." << std::endl;
-            }
+            if(debug)std::cout << "Found the " << *iT << " trigger." << std::endl;
+         }
       } 
    }
 
@@ -2690,7 +2190,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       }
 
    }  
-
 
    /////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2807,7 +2306,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    lab_nAK4 = 0;
    nAK4 = 0;
    nAK4_uncut = 0;   
-   int nAK4_noHEM = 0;  
    std::vector<TLorentzVector> leadAK4Jets;
    std::vector<TLorentzVector> selectedAK4_TLV; // will be used to study superjet taggging flavour dependence 
 
@@ -2905,7 +2403,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       ////////////////////////////////////////////////////////////////////////////////////////////////////////////
       //////////   _JET ENERGY RESOLUTION STUFF //////////////////////////////////////////////////////////////////
       ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-      double AK4_JER_corr_factor_nom = 1.0;
 
       if(doJER)
       {
@@ -2915,8 +2412,7 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
 
             if(_verbose)std::cout << "doing JER" << std::endl;
 
-            double sJER     = -1e12;  
-            double sJER_nom     = -1e12;  //JER scale factor
+            double sJER     = -1e12;    //JER scale factor
             double sigmaJER = -1e12;    //this is the "resolution" you get from the scale factors 
             
             //these are for getting the JER scale factors
@@ -2930,7 +2426,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             parameters.setJetPt(iJet->pt());
             parameters.setJetEta(iJet->eta());
             sJER =  resolution_sf_AK4.getScaleFactor(parameters  );  // nominal sJER value
-            sJER_nom = resolution_sf_AK4.getScaleFactor(parameters    ); // copy of the nominal sJER value
             
             if( applyJERSource(systematicType, iJet->eta())  ) // only true if this is run for the JER uncertainty AND if the jet eta is in the correct range
             {
@@ -2942,14 +2437,12 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             if( genJet)   // try the first technique with gen jets
             {
                AK4_JER_corr_factor = 1 + (sJER - 1)*(iJet->pt()-genJet->pt())/iJet->pt();
-               AK4_JER_corr_factor_nom = 1 + (sJER_nom - 1)*(iJet->pt()-genJet->pt())/iJet->pt();
             }
             else   // if no gen jet is matched, try the second technique
             {
                randomNum->SetSeed( abs(static_cast<int>(iJet->phi()*1e4)) );
                double JERrand = randomNum->Gaus(0.0, sigmaJER);
                AK4_JER_corr_factor = max(0., 1 + JERrand*sqrt(max(pow(sJER,2)-1,0.)));   //want to make sure this is truncated at 0
-               AK4_JER_corr_factor_nom = max(0., 1 + JERrand*sqrt(max(pow(sJER_nom,2)-1,0.)));  //want to make sure this is truncated at 0
             }
             if(_verbose)std::cout << "finished with JER" << std::endl;
             AK4_sf_total*= AK4_JER_corr_factor;
@@ -2968,23 +2461,18 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       nAK4_uncut++;
 
       //measure event HT
-      if((corrJet.pt() > 50.)&&(abs(corrJet.eta()) < 2.5)  )totHT+= abs(corrJet.pt() );
+      if((corrJet.pt() > 30.)&&(abs(corrJet.eta()) < 2.5)  )totHT+= abs(corrJet.pt() );
       
       // apply AK4 jet selection (post JEC and JER)
       bool PUID = true;  // assumed true if not applying this
-      if((doPUID) && (corrJet.pt() < 50.))
+      if(doPUID)
       {
          PUID = false;
-         PUID = bool( (corrJet.userInt("pileupJetIdUpdated:fullId") & (1 << 1)));
+         PUID = bool( (corrJet.userInt("pileupJetIdUpdated:fullId") & (1 << 1)) || (corrJet.pt() > 50.) );
 
       }
-     if( (corrJet.pt() <50.) || (!(corrJet.isPFJet())) || (!isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(), corrJet.pt() )) )  // changed from 30 GeV
-        {
-            if(debug) std::cout << "Jet does not pass initial selection " << std::endl;
-            continue;
-        }
-      double jec = iJet->pt() / iJet->correctedP4("Uncorrected").pt();
-      AK4_jec_full[nAK4] = jec;
+      if( (corrJet.pt()  <30.) || (!(corrJet.isPFJet())) || (!isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(), corrJet.pt() )) ) continue;
+      
 
       double deepJetScore = corrJet.bDiscriminator("pfDeepFlavourJetTags:probb") + corrJet.bDiscriminator("pfDeepFlavourJetTags:probbb")+ corrJet.bDiscriminator("pfDeepFlavourJetTags:problepb");
       JEC_uncert_AK4[nAK4] = AK4_JEC_corr_factor;
@@ -3002,16 +2490,9 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          nGenBJets_AK4[nAK4] = 0;
          AK4_partonFlavour[nAK4] = corrJet.partonFlavour();
          AK4_hadronFlavour[nAK4] = corrJet.hadronFlavour();
-         int chi_pdgid = 9936662;
-         nChis = 0;
 
          for (auto iG = genPartCollection->begin(); iG != genPartCollection->end(); iG++) 
          {
-            if(abs(iG->pdgId()) ==chi_pdgid )
-                {
-                   chi_pt[nChis] = iG->pt();
-                   nChis++;
-                }
             if( (abs(iG->pdgId()) != 5) || (iG->pt() < 10.)|| (!(iG->isLastCopy())) ) continue;  //only b jets that are the last copy
             if(  sqrt(pow(corrJet.phi()-iG->phi(),2)+ pow(corrJet.eta()-iG->eta(),2))   < 0.4     ) nGenBJets_AK4[nAK4]++;
          }
@@ -3029,10 +2510,9 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             //these are the bins of the eff histogram (pt vs eta) you need to draw from
             // histogram size:  xbins: 63, xmin: 0, xmax: 6000,  ybins: 18, ymin: -2.4, ymax: 2.4   
 
-                // should import the histogram size here so this dosn't have to be manually changed
-
-                int xbin = (int)((AK4_JER_corr_factor_nom*iJet->pt())*bTagEffMap_nPtBins/bTagEffMap_PtRange) + 1;
-                int ybin = (int)((iJet->eta()-bTagEffMap_Eta_low)*bTagEffMap_nEtaBins/(bTagEffMap_Eta_high-bTagEffMap_Eta_low)) +1;
+            // should import the histogram size here so this dosn't have to be manually changed
+            int xbin = (int)(corrJet.pt()*bTagEffMap_nPtBins/bTagEffMap_PtRange) + 1;
+            int ybin = (int)((corrJet.eta()-bTagEffMap_Eta_low)*bTagEffMap_nEtaBins/(bTagEffMap_Eta_high-bTagEffMap_Eta_low)) +1;
 
             if(debug) std::cout << "bTagEffMap_nPtBins/bTagEffMap_PtRange/bTagEffMap_Eta_low/bTagEffMap_nEtaBins/bTagEffMap_Eta_high:" <<bTagEffMap_nPtBins << "/"  <<bTagEffMap_PtRange << "/" <<bTagEffMap_Eta_low << "/" <<bTagEffMap_nEtaBins << "/" <<bTagEffMap_Eta_high << std::endl;
             double SF, SF_up, SF_down;
@@ -3044,62 +2524,29 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             if(corrJet.hadronFlavour() == 0)   //light jets
             {
 
-                  int xbin_tight = xbin;
-                    int xbin_med    = xbin;
+               bTag_eff_value     = lightjet_eff->GetBinContent(xbin,ybin);
+               bTag_eff_value_med = lightjet_eff_med->GetBinContent(xbin,ybin);
 
-                    if (xbin_tight > lastNonEmptyEFfMapPtBin_truelight[ybin]) 
-                    {
-                        if(_verbose)
-                        {
-                            std::cout << "Bad b-tagging effeciency map (true light jet, tight WP)." << std::endl; 
+               SF     = cset_corrector_light->evaluate({"central", "T", 0, std::abs(corrJet.eta()), corrJet.pt()}); /// tight WP SF
+               SF_med = cset_corrector_light->evaluate({"central", "M", 0, std::abs(corrJet.eta()), corrJet.pt()});
 
-                            std::cout << "Bad b-tagging effeciency map (true b jet, med WP)." << std::endl; 
-                            std::cout << "moving to lastNonEmptyEFfMapPtBin_truelight[ybin] = " << lastNonEmptyEFfMapPtBin_truelight[ybin] << std::endl;
-                            std::cout << "This corresponds to (y)-bin " << ybin << " out of bTagEffMap_nEtaBins total bins in the histogram. " << std::endl;
-                            std::cout << "This is what lastNonEmptyEFfMapPtBin_truelight looks like: " << std::endl;
-                            for(int jjj = 0; jjj < bTagEffMap_nEtaBins; jjj++)
-                            {
-                                std::cout << lastNonEmptyEFfMapPtBin_truelight[jjj] << " ";
-                            }
-                            std::cout << std::endl;
-                        }
-                        xbin_tight  = lastNonEmptyEFfMapPtBin_truelight[ybin];
-                    }
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    if (xbin_med    >  lastNonEmptyEFfMapPtBin_med_truelight[ybin]) 
-                    {
-                        if(_verbose)std::cout << "Bad b-tagging effeciency map (true light jet, med WP)." << std::endl; 
-                        xbin_med =  lastNonEmptyEFfMapPtBin_med_truelight[ybin];
-                    }
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    bTag_eff_value    = lightjet_eff->GetBinContent(xbin_tight,ybin);
-                bTag_eff_value_med = lightjet_eff_med->GetBinContent(xbin_med,ybin);
+               SF_corr_up_med       = cset_corrector_light->evaluate({"up_correlated", "M", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down_med     = cset_corrector_light->evaluate({"down_correlated", "M", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_up     = cset_corrector_light->evaluate({"up_correlated", "T", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down   = cset_corrector_light->evaluate({"down_correlated", "T", 0, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    SF    = cset_corrector_light->evaluate({"central", "T", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()}); /// tight WP SF
-                    SF_med = cset_corrector_light->evaluate({"central", "M", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               jet_bTagSF_light_T[nTrue_light_AK4] = SF;
+               jet_bTagSF_light_M[nTrue_light_AK4] = SF_med;
 
-                    SF_corr_up_med       = cset_corrector_light->evaluate({"up_correlated", "M", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down_med  = cset_corrector_light->evaluate({"down_correlated", "M", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_up  = cset_corrector_light->evaluate({"up_correlated", "T", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down    = cset_corrector_light->evaluate({"down_correlated", "T", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               nTrue_light_AK4++;
 
-                    jet_bTagSF_light_T[nTrue_light_AK4] = SF;
-                    jet_bTagSF_light_M[nTrue_light_AK4] = SF_med;
+               // tight WP uncorrelated
+               SF_up   = cset_corrector_light->evaluate({"up_uncorrelated", "T", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down = cset_corrector_light->evaluate({"down_uncorrelated", "T", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               // med WP
+               SF_up_med   = cset_corrector_light->evaluate({"up_uncorrelated", "M", 0, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down_med = cset_corrector_light->evaluate({"down_uncorrelated", "M", 0, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    nTrue_light_AK4++;
-
-                    // tight WP uncorrelated
-                    SF_up   = cset_corrector_light->evaluate({"up_uncorrelated", "T", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down = cset_corrector_light->evaluate({"down_uncorrelated", "T", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    // med WP
-                    SF_up_med    = cset_corrector_light->evaluate({"up_uncorrelated", "M", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down_med = cset_corrector_light->evaluate({"down_uncorrelated", "M", 0, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
 
                //////// MED WP SCALE FACTOR ////////
                if( deepJetScore > deepJet_wp_med)
@@ -3205,71 +2652,37 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
                }
             }
             else if(corrJet.hadronFlavour() == 4) //charm jets
-                {
-                    int xbin_tight = xbin;
-                    int xbin_med    = xbin;
+            {
+               bTag_eff_value = truecjet_eff->GetBinContent(xbin,ybin);
+               bTag_eff_value_med = truecjet_eff_med->GetBinContent(xbin,ybin);
 
-                    if (xbin_tight > lastNonEmptyEFfMapPtBin_truec[ybin])
-                    {
-                        if(_verbose)
-                        {
-                            std::cout << "Bad b-tagging effeciency map (true c jet, tight WP)." << std::endl; 
+               SF = cset_corrector_bc->evaluate(   {"central", "T", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_med = cset_corrector_bc->evaluate(   {"central", "M", 4, std::abs(corrJet.eta()), corrJet.pt()});
 
-                            std::cout << "Bad b-tagging effeciency map (true b jet, med WP)." << std::endl; 
-                            std::cout << "moving to lastNonEmptyEFfMapPtBin_truec[ybin] = " << lastNonEmptyEFfMapPtBin_truec[ybin] << std::endl;
-                            std::cout << "This corresponds to (y)-bin " << ybin << " out of bTagEffMap_nEtaBins total bins in the histogram. " << std::endl;
-                            std::cout << "This is what lastNonEmptyEFfMapPtBin_truec looks like: " << std::endl;
-                            for(int jjj = 0; jjj < bTagEffMap_nEtaBins; jjj++)
-                            {
-                                std::cout << lastNonEmptyEFfMapPtBin_truec[jjj] << "  ";
-                            }
-                            std::cout << std::endl;
-                        }
+               jet_bTagSF_c_T[nTrue_c_AK4] = SF;
+               jet_bTagSF_c_M[nTrue_c_AK4] = SF_med;
 
-                        xbin_tight  = lastNonEmptyEFfMapPtBin_truec[ybin];
-                    } 
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    if (xbin_med    >  lastNonEmptyEFfMapPtBin_med_truec[ybin])
-                    {
-                        if(_verbose)std::cout << "Bad b-tagging effeciency map (true c jet, med WP)." << std::endl; 
-                        xbin_med =  lastNonEmptyEFfMapPtBin_med_truec[ybin];
-                    } 
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    bTag_eff_value = truecjet_eff->GetBinContent(xbin_tight,ybin);
-                    bTag_eff_value_med = truecjet_eff_med->GetBinContent(xbin_med,ybin);
+               nTrue_c_AK4++;
 
-                    SF = cset_corrector_bc->evaluate(    {"central", "T", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_med = cset_corrector_bc->evaluate(  {"central", "M", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               //uncorrelated
+               // tight WP
+               SF_up = cset_corrector_bc->evaluate({"up_uncorrelated", "T", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down = cset_corrector_bc->evaluate(   {"down_uncorrelated", "T", 4, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    jet_bTagSF_c_T[nTrue_c_AK4] = SF;
-                    jet_bTagSF_c_M[nTrue_c_AK4] = SF_med;
+               // med WP
+               SF_up_med = cset_corrector_bc->evaluate({"up_uncorrelated", "M", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down_med = cset_corrector_bc->evaluate(   {"down_uncorrelated", "M", 4, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    nTrue_c_AK4++;
+               // correlated
+               // tight WP
+               SF_corr_up = cset_corrector_bc->evaluate({"up_correlated", "T", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down = cset_corrector_bc->evaluate(   {"down_correlated", "T", 4, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    //uncorrelated
-                    // tight WP
-                    SF_up = cset_corrector_bc->evaluate({"up_uncorrelated", "T", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down = cset_corrector_bc->evaluate(   {"down_uncorrelated", "T", 4, std::abs(iJet->eta()),AK4_JER_corr_factor_nom* iJet->pt()});
+               // med WP
+               SF_corr_up_med = cset_corrector_bc->evaluate({"up_correlated", "M", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down_med = cset_corrector_bc->evaluate(   {"down_correlated", "M", 4, std::abs(corrJet.eta()), corrJet.pt()});
+               if(_verbose)std::cout << "Scale factor is " << SF << std::endl;
 
-                    // med WP
-                    SF_up_med = cset_corrector_bc->evaluate({"up_uncorrelated", "M", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down_med = cset_corrector_bc->evaluate(    {"down_uncorrelated", "M", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-
-                    // correlated
-                    // tight WP
-                    SF_corr_up = cset_corrector_bc->evaluate({"up_correlated", "T", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down = cset_corrector_bc->evaluate(  {"down_correlated", "T", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-
-                    // med WP
-                    SF_corr_up_med = cset_corrector_bc->evaluate({"up_correlated", "M", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down_med = cset_corrector_bc->evaluate(   {"down_correlated", "M", 4, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    if(_verbose)std::cout << "Scale factor is " << SF << std::endl;
                //////// MED WP SCALE FACTOR ////////
                if(deepJetScore > deepJet_wp_med)
                {
@@ -3370,71 +2783,37 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             }
             else if(corrJet.hadronFlavour() == 5) // b jets
             {
-                int xbin_tight = xbin;
-                    int xbin_med    = xbin;
+               bTag_eff_value = truebjet_eff->GetBinContent(xbin,ybin);
+               bTag_eff_value_med = truebjet_eff_med->GetBinContent(xbin,ybin);
 
-                    if (xbin_tight > lastNonEmptyEFfMapPtBin_trueb[ybin])
-                    {
-                        if(_verbose)std::cout << "Bad b-tagging effeciency map (true b jet, tight WP)." << std::endl; 
-                        xbin_tight  = lastNonEmptyEFfMapPtBin_trueb[ybin];
-                    } 
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    if (xbin_med    >  lastNonEmptyEFfMapPtBin_med_trueb[ybin])
-                    {
+               SF             = cset_corrector_bc->evaluate(   {"central", "T", 5, std::abs(corrJet.eta()), corrJet.pt()}); // tight WP
+               SF_med         = cset_corrector_bc->evaluate(   {"central", "M", 5, std::abs(corrJet.eta()), corrJet.pt()}); // med WP
 
-                        if(_verbose)
-                        { 
-                            std::cout << "Bad b-tagging effeciency map (true b jet, med WP)." << std::endl; 
-                            std::cout << "moving to lastNonEmptyEFfMapPtBin_med_trueb[ybin] = " << lastNonEmptyEFfMapPtBin_med_trueb[ybin] << std::endl;
-                            std::cout << "This corresponds to (y)-bin " << ybin << " out of bTagEffMap_nEtaBins total bins in the histogram. " << std::endl;
-                            std::cout << "This is what lastNonEmptyEFfMapPtBin_med_trueb looks like: " << std::endl;
-                            for(int jjj = 0; jjj < bTagEffMap_nEtaBins; jjj++)
-                            {
-                                std::cout << lastNonEmptyEFfMapPtBin_med_trueb[jjj] << " ";
-                            }
-                            std::cout << std::endl;
-                        }
-                        xbin_med =  lastNonEmptyEFfMapPtBin_med_trueb[ybin];
+               jet_bTagSF_b_T[nTrue_b_AK4] = SF;
+               jet_bTagSF_b_M[nTrue_b_AK4] = SF_med;
 
-                    } 
-                    else
-                    {
-                        if(_verbose)std::cout << "b-tagging eff value is fine." << std::endl;
-                    }
-                    bTag_eff_value = truebjet_eff->GetBinContent(xbin_tight,ybin);
-                     bTag_eff_value_med = truebjet_eff_med->GetBinContent(xbin_med,ybin);
+               nTrue_b_AK4++;
 
-                    SF             = cset_corrector_bc->evaluate(    {"central", "T", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()}); // tight WP
-                    SF_med        = cset_corrector_bc->evaluate(   {"central", "M", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()}); // med WP
+               //uncorrelated
+               // tight WP
+               SF_up = cset_corrector_bc->evaluate({"up_uncorrelated", "T", 5, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down = cset_corrector_bc->evaluate(   {"down_uncorrelated", "T", 5, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    jet_bTagSF_b_T[nTrue_b_AK4] = SF;
-                    jet_bTagSF_b_M[nTrue_b_AK4] = SF_med;
-
-                    nTrue_b_AK4++;
-
-                    //uncorrelated
-                    // tight WP
-                    SF_up = cset_corrector_bc->evaluate({"up_uncorrelated", "T", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down = cset_corrector_bc->evaluate(   {"down_uncorrelated", "T", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-
-                    // med WP
-                    SF_up_med = cset_corrector_bc->evaluate({"up_uncorrelated", "M", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_down_med = cset_corrector_bc->evaluate(    {"down_uncorrelated", "M", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               // med WP
+               SF_up_med = cset_corrector_bc->evaluate({"up_uncorrelated", "M", 5, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_down_med = cset_corrector_bc->evaluate(   {"down_uncorrelated", "M", 5, std::abs(corrJet.eta()), corrJet.pt()});
 
 
-                    // correlated
-                    // tight WP
-                    SF_corr_up = cset_corrector_bc->evaluate({"up_correlated", "T", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down = cset_corrector_bc->evaluate(  {"down_correlated", "T", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               // correlated
+               // tight WP
+               SF_corr_up = cset_corrector_bc->evaluate({"up_correlated", "T", 5, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down = cset_corrector_bc->evaluate(   {"down_correlated", "T", 5, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    // med WP
-                    SF_corr_up_med = cset_corrector_bc->evaluate({"up_correlated", "M", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
-                    SF_corr_down_med = cset_corrector_bc->evaluate(   {"down_correlated", "M", 5, std::abs(iJet->eta()), AK4_JER_corr_factor_nom*iJet->pt()});
+               // med WP
+               SF_corr_up_med = cset_corrector_bc->evaluate({"up_correlated", "M", 5, std::abs(corrJet.eta()), corrJet.pt()});
+               SF_corr_down_med = cset_corrector_bc->evaluate(   {"down_correlated", "M", 5, std::abs(corrJet.eta()), corrJet.pt()});
 
-                    if(_verbose)std::cout << "Scale factor is " << SF << std::endl;
+               if(_verbose)std::cout << "Scale factor is " << SF << std::endl;
 
                //////// MED WP SCALE FACTOR ////////
                if(deepJetScore > deepJet_wp_med)
@@ -3544,8 +2923,8 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          }
       }
 
-      int vetoMap_xbin = (int)((iJet->eta() - jetVetoMap_Xmin)*jetVetoMap_nBinsX/jetVetoMap_XRange ) +1;       // eta(b) = b*(range / # bins) + b0 -> b(eta) = (eta - b0)*(# bins / range)
-      int vetoMap_ybin = (int)((iJet->phi() - jetVetoMap_Ymin)*jetVetoMap_nBinsY/jetVetoMap_YRange ) +1;       // phi(b) = b*(range / # bins) + b0 -> b(phi) = (phi - b0)*(# bins / range)
+      int vetoMap_xbin = (int)((corrJet.eta() - jetVetoMap_Xmin)*jetVetoMap_nBinsX/jetVetoMap_XRange ) +1;       // eta(b) = b*(range / # bins) + b0 -> b(eta) = (eta - b0)*(# bins / range)
+      int vetoMap_ybin = (int)((corrJet.phi() - jetVetoMap_Ymin)*jetVetoMap_nBinsY/jetVetoMap_YRange ) +1;       // phi(b) = b*(range / # bins) + b0 -> b(phi) = (phi - b0)*(# bins / range)
       AK4_fails_veto_map[nAK4] = false; // failing the veto map is a bad thing, it means these regions are not "hot"
       if(jetVetoMap->GetBinContent(vetoMap_xbin,vetoMap_ybin) > 0) AK4_fails_veto_map[nAK4] = true;
 
@@ -3553,20 +2932,15 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
 
       if(isHEM(corrJet.eta(),corrJet.phi()))
       {
-         jet_isHEM[nAK4] = true;
+         jet_isHEM[nfatjets] = true;
       } 
-      else{jet_isHEM[nAK4] = false;}
+      else{jet_isHEM[nfatjets] = false;}
       // passesJetPUID
       lab_AK4_pt[nAK4] = corrJet.pt();
       AK4_mass[nAK4] = corrJet.mass();
       AK4_ptot[nAK4] = corrJet.p();
       AK4_eta[nAK4] = corrJet.eta();
       AK4_phi[nAK4] = corrJet.phi();
-      AK4_px[nAK4] = corrJet.px();
-        AK4_py[nAK4] = corrJet.py();
-        AK4_pz[nAK4] = corrJet.pz();
-        AK4_E[nAK4] = corrJet.energy();
-        passesJetPUID[nAK4] = false;
 
       if (doPUID) passesJetPUID[nAK4] = PUID;
 
@@ -3577,11 +2951,10 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       lab_AK4_AK8_parent[nAK4] = -1;  // init this to identify AK4 jets that aren't inside any AK8 jets
       AK4_SJ_assignment[nAK4] = -999; // this will correspond to AK4 jets that are not assigned to a superjet (because they're not in an AK8 jet)
 
-      if(nAK4_noHEM < 4)
+      if(nAK4 < 4)
       {
          leadAK4Jets.push_back(TLorentzVector(corrJet.px(),corrJet.py(),corrJet.pz(),corrJet.energy()));
       }
-      if(!jet_isHEM[nAK4] && !AK4_fails_veto_map[nAK4]  )nAK4_noHEM++; 
       nAK4++;
 
    }
@@ -3674,17 +3047,17 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    {  
       if( (totHT > 1600) ||  (totHT  < 1200)  ) return; // only want to lower HT region, RETURN cut
    }
-  // else // MAIN-BAND
-  // {
-  //    if(slimmedSelection) // slimmed selection to save space
-  //    {
-  //       if( totHT < HT_cut ) return; // RETURN cut
-   //   }
-   //   else // normal selection 
-  //    {
-  //       if( totHT < HT_cut ) return; // RETURN cut
-   //   }
-  // }
+   else // MAIN-BAND
+   {
+      if(slimmedSelection) // slimmed selection to save space
+      {
+         if( totHT < 1600 ) return; // RETURN cut
+      }
+      else // normal selection 
+      {
+         if( totHT < 1400 ) return; // RETURN cut
+      }
+   }
 
 
 
@@ -3762,7 +3135,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
 
    JME::JetResolution resolution = JME::JetResolution::get(iSetup, "AK8PF_pt");                          //load JER stuff from global tag
    JME::JetResolutionScaleFactor resolution_sf = JME::JetResolutionScaleFactor::get(iSetup, "AK8PF");
-   double AK8_jet_corrections[50];
 
 
     /////////// (4) set grid variable variable counters to zero (ex. nAK8_Et250 = 0;) ///////////
@@ -3780,7 +3152,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    std::vector<TLorentzVector> leadAK8Jets;
    //diAK8Jet_mass
    double tot_jet_px=0,tot_jet_py=0,tot_jet_pz=0, tot_jet_E=0;
-   double selected_AK8_px = 0, selected_AK8_py =0, selected_AK8_pz = 0, selected_AK8_E = 0;
 
     ///    JEC DEBUGGINGstd::cout << "---------- NEW EVENT ----------" << std::endl;
     ///    JEC DEBUGGINGstd::cout << "The systematic is " << systematicType << ", and the sources are: " << std::endl;
@@ -3865,11 +3236,11 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             {
                if( systematicType.find("_up") != std::string::npos ) 
                {
-                  sJER = resolution_sf.getScaleFactor(parameters, Variation::UP);    // SF + 1 sigma uncertainty
+                  sJER = resolution_sf_AK4.getScaleFactor(parameters, Variation::UP);    // SF + 1 sigma uncertainty
                }
                else if( systematicType.find("_down") != std::string::npos ) 
                {
-                  sJER = resolution_sf.getScaleFactor(parameters, Variation::DOWN);  // SF - 1 sigma uncertainty
+                  sJER = resolution_sf_AK4.getScaleFactor(parameters, Variation::DOWN);  // SF - 1 sigma uncertainty
                }
             }
 
@@ -3903,95 +3274,7 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       if(_verbose)  std::cout << "nominal p4: " << iJet->px()<< "," <<iJet->py() << "," << iJet->pz()<< "," << iJet->energy()<< std::endl;
       if(_verbose)  std::cout << "corrected p4: " << corrJet.px()<< "," <<corrJet.py() << "," << corrJet.pz()<< "," << corrJet.energy()<< std::endl;
 
-        //////// START -- SD mass corrections
-
-        TLorentzVector puppi_softdrop, puppi_softdrop_subjet;
-        auto const & sdSubjetsPuppi = iJet->subjets("SoftDropPuppi");
-        for ( auto const & it : sdSubjetsPuppi ) 
-        {
-            double sj_corr = 1.0;
-            double sj_JEC_corr = 1.0;      
-
-            // get the subjet AK4 JEC value
-            subjetCorrector->setJetPt(it->correctedP4("Uncorrected").pt()); // use the uncorrected subjet pt
-            subjetCorrector->setJetEta(it->eta());
-            subjetCorrector->setJetA(it->jetArea());
-            subjetCorrector->setRho(*rho); 
-            sj_JEC_corr = subjetCorrector->getCorrection();
-
-            // get the fractional JEC uncertainty value
-            double AK4_JEC_uncert;
-            double AK4_JEC_corr_factor = 1.0;
-
-            if(systematicType.find("_up") != std::string::npos) 
-            {
-                AK4_JEC_uncert = getJECUncertaintyFromSources("AK4", sj_JEC_corr*it->correctedP4(0).pt(), it->correctedP4(0).eta(), true);
-                AK4_JEC_corr_factor = 1 + AK4_JEC_uncert;
-            }
-            else if(systematicType.find("_down") != std::string::npos) 
-            {
-                AK4_JEC_uncert = getJECUncertaintyFromSources("AK4", sj_JEC_corr*it->correctedP4(0).pt(), it->correctedP4(0).eta(), true);
-                AK4_JEC_corr_factor = 1 - AK4_JEC_uncert;
-            }  
-
-            sj_corr = AK4_JEC_corr_factor*sj_JEC_corr;
-            if(_verbose)std::cout << "After JECs, the AK8 puppi subjet correction is " << sj_corr << std::endl;
-
-            // get JER correction, USE THE JEC CORRECTED (nom) VALUE TO CALCULATE
-            if(doJER)
-            {
-                if ((runType.find("MC") != std::string::npos) || (runType.find("Suu") != std::string::npos) )
-                {
-                    double AK4_JER_corr = 1.0; // this won't be touched for data
-
-                    double sJER = -1e12;  //JER scale factor
-                    double sigmaJER = -1e12;    //this is the "resolution" you get from the scale factors 
-
-                    //these are for getting the JER scale factors
-                    JME::JetParameters parameters_1;
-                    parameters_1.setJetPt(sj_JEC_corr*it->correctedP4(0).pt());
-                    parameters_1.setJetEta(it->correctedP4(0).eta());
-                    parameters_1.setRho(*rho);
-                    sigmaJER = resolution_AK4.getResolution(parameters_1);    //pT resolution
-
-                    JME::JetParameters parameters;
-                    parameters.setJetPt(sj_JEC_corr*it->correctedP4(0).pt());
-                    parameters.setJetEta(it->correctedP4(0).eta());
-                    sJER    = resolution_sf_AK4.getScaleFactor(parameters ); // nominal sJER value
-
-                    if( applyJERSource(systematicType, it->correctedP4(0).eta()) ) // only true if this is run for the JER uncertainty AND if the jet eta is in the correct range
-                    {
-                        if( systematicType.find("_up") != std::string::npos )        sJER = resolution_sf_AK4.getScaleFactor(parameters, Variation::UP    ); // sJER + 1 sigma uncertainty
-                        else if( systematicType.find("_down") != std::string::npos ) sJER = resolution_sf_AK4.getScaleFactor(parameters, Variation::DOWN); // sJER - 1 sigma uncertainty
-                    }
-
-                    randomNum->SetSeed( abs(static_cast<int>(it->correctedP4(0).phi()*1e4)) );
-                    double JERrand = randomNum->Gaus(0.0, sigmaJER);
-                    AK4_JER_corr  = max(0., 1 + JERrand*sqrt(max(pow(sJER,2)-1,0.))); //want to make sure this is truncated at 0
-
-                    sj_corr*= AK4_JER_corr;
-                    if(_verbose)std::cout << "After JERs, the AK8 puppi subjet correction is " << sj_corr << std::endl;
-
-                }
-            } 
-            
-            // add up the subjet 4-vector
-            puppi_softdrop_subjet.SetPtEtaPhiM(sj_corr*it->correctedP4(0).pt(),it->correctedP4(0).eta(),it->correctedP4(0).phi(),sj_corr*it->correctedP4(0).mass());
-            puppi_softdrop+=puppi_softdrop_subjet;
-        }
-
-        double M_SD                = puppi_softdrop.M(); // corrected SD mass
-        if (M_SD < 0) M_SD = 0;
-        double M_SD_uncorr_usrstr_ = iJet->userFloat("ak8PFJetsPuppiSoftDropMass");
-        double SD_corr_            = 1.0; // the correction factor  
-        if(M_SD_uncorr_usrstr_ < 0) M_SD_uncorr_usrstr_ = 0;
-        else {SD_corr_ = M_SD/M_SD_uncorr_usrstr_; }
-
-
-        //////// END -- SD mass corrections
-
-
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.)) 
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.)) 
       {
          if(isHEM(corrJet.eta(),corrJet.phi())) jet_pre_isHEM[nfatjet_pre] = true;
          else{ jet_pre_isHEM[nfatjet_pre] = false;}
@@ -4011,61 +3294,61 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 350.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET350++;
       if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET400++;
 
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M10++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M20++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M30++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M40++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M45++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M50++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M55++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M60++;
-      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M70++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M10++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M20++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M30++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M40++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M45++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M50++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M55++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M60++;
+      if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M70++;
       
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M10++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M20++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M30++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M40++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M45++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M50++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M55++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M60++;
-      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M70++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M10++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M20++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M30++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M40++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M45++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M50++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M55++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M60++;
+      if((corrJet.pt() > 500.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt500_M70++;
       
 
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M10++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M20++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M30++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M40++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M45++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M50++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M55++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M60++;
-      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M70++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M10++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M20++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M30++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M40++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M45++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M50++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M55++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M60++;
+      if((corrJet.pt() > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt400_M70++;
 
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M10++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M20++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M30++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M40++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M45++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M50++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M55++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M60++;
-      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M70++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M10++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M20++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M30++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M40++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M45++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M50++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M55++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M60++;
+      if((corrJet.pt() > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt300_M70++;
 
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M10++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M20++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M30++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M40++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M45++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M50++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M55++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M60++;
-      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M70++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M10++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M20++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M30++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 40.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M40++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 45.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M45++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 50.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M50++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 55.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M55++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 60.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M60++;
+      if((corrJet.pt() > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (corrJet.userFloat("ak8PFJetsPuppiSoftDropMass") > 70.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt200_M70++;
 
 
-      if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) < ET_cut) || (!(corrJet.isPFJet())) || (!isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) || (corrJet.mass()< 0.)) continue; //userFloat("ak8PFJetsPuppiSoftDropMass")
-      leadAK8Jets.push_back(TLorentzVector(corrJet.px(),corrJet.py(),corrJet.pz(),corrJet.energy()));
-      AK8_jet_corrections[nfatjets] = AK8_sf_total;
+      if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) < 300.) || (!(corrJet.isPFJet())) || (!isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) || (corrJet.mass()< 0.)) continue; //userFloat("ak8PFJetsPuppiSoftDropMass")
+
+
       if(isHEM(corrJet.eta(),corrJet.phi()))
       {
          fatjet_isHEM[nfatjets] = true;
@@ -4079,39 +3362,12 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       AK8_fails_veto_map[nfatjets] = false;
       if(jetVetoMap->GetBinContent(vetoMap_xbin,vetoMap_ybin) > 0.) AK8_fails_veto_map[nfatjets] = true; // saved for future vetoing
 
-      
+      if(nfatjets < 2) leadAK8_mass[nfatjets] = corrJet.userFloat("ak8PFJetsPuppiSoftDropMass");
       jet_pt[nfatjets]   = corrJet.pt();
       jet_phi[nfatjets]  = corrJet.phi();  
       jet_eta[nfatjets]  = corrJet.eta();
       jet_mass[nfatjets] = corrJet.mass();
-      jet_px[nfatjets]      = corrJet.px();
-        jet_py[nfatjets]      = corrJet.py();
-        jet_pz[nfatjets]      = corrJet.pz();
-        jet_E[nfatjets]       = corrJet.energy();
-        jet_SD_mass[nfatjets]        = M_SD;  
-        M_SD_uncorr_usrstr[nfatjets] = M_SD_uncorr_usrstr_;
-        SD_corr[nfatjets]            = SD_corr_;
 
-      double jec = iJet->pt() / iJet->correctedP4("Uncorrected").pt();
-        jet_jec_full[nfatjets] = jec;
-
-        jet_mass_by_mass_[nfatjets] = corrJet.mass();
-
-        jet_pt_by_pt[nfatjets] = corrJet.pt();
-
-        selected_AK8_px += corrJet.px();
-        selected_AK8_py += corrJet.py();
-        selected_AK8_pz += corrJet.pz();
-        selected_AK8_E  += corrJet.energy();
-
-        const reco::GenJet *genJet_ = iJet->genJet();
-        jet_pt_gen[nfatjets] = ( genJet_) ? genJet_->pt() : 0.0;
-
-
-
-        jet_nParts_by_mass[nfatjets] = corrJet.numberOfDaughters(); 
-
-        if(_verbose)    std::cout << "Collecting particles from selected AK8 jets." << std::endl;
 
       // save selected AK8 jet particles for use in calculating the thrust axis
       for (unsigned int iii=0; iii<iJet->numberOfDaughters();iii++)   // get all jet particles
@@ -4119,8 +3375,8 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          const reco::Candidate* iJ = iJet->daughter(iii);
          const pat::PackedCandidate* candJetbegin = (pat::PackedCandidate*) iJ;
          double puppiweight = candJetbegin->puppiWeight();
-         candsUnboosted.push_back(LeafCandidate(iJet->daughter(iii)->charge(), Particle::LorentzVector(jec*AK8_sf_total*puppiweight*iJ->px(), jec*AK8_sf_total*puppiweight*iJ->py(), jec*AK8_sf_total*puppiweight*iJ->pz(), jec*AK8_sf_total*puppiweight*iJ->energy())));
-         tot_jet_px+=jec*AK8_sf_total*puppiweight*candJetbegin->px();tot_jet_py+=jec*AK8_sf_total*puppiweight*candJetbegin->py();tot_jet_pz+=jec*AK8_sf_total*puppiweight*candJetbegin->pz();tot_jet_E+=jec*AK8_sf_total*puppiweight*candJetbegin->energy();
+         candsUnboosted.push_back(LeafCandidate(iJet->daughter(iii)->charge(), Particle::LorentzVector(AK8_sf_total*puppiweight*iJ->px(), AK8_sf_total*puppiweight*iJ->py(), AK8_sf_total*puppiweight*iJ->pz(), AK8_sf_total*puppiweight*iJ->energy())));
+         tot_jet_px+=AK8_sf_total*puppiweight*candJetbegin->px();tot_jet_py+=AK8_sf_total*puppiweight*candJetbegin->py();tot_jet_pz+=AK8_sf_total*puppiweight*candJetbegin->pz();tot_jet_E+=AK8_sf_total*puppiweight*candJetbegin->energy();
       }
       if(nfatjets < 4) leadAK8Jets.push_back(TLorentzVector(corrJet.px(),corrJet.py(),corrJet.pz(),corrJet.energy()));
 
@@ -4143,29 +3399,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       nfatjets++;
    } // end AK8 jet loop
 
- int pt_indices[nfatjets];
-    std::iota(pt_indices, pt_indices + nfatjets, 0); 
-
-
-    std::sort(pt_indices, pt_indices + nfatjets, 
-    [this](int i, int j) {
-        return jet_pt_by_pt[i] > jet_pt_by_pt[j]; // Sort Ascending
-    }
-    );
-
-    for (int i = 0; i < nfatjets; ++i) 
-    {
-        jet_mass_by_mass[i] = jet_mass_by_mass_[pt_indices[i]];
-    }
-
-
-
-    //std::sort(jet_mass_by_mass, jet_mass_by_mass + nfatjets, std::greater<double>());
-    std::sort(jet_pt_by_pt, jet_pt_by_pt + nfatjets, std::greater<double>());
-    std::sort(jet_nParts_by_mass , jet_nParts_by_mass + nfatjets, std::greater<double>());
-
-
-    if(_verbose)  std::cout << "Calcualting dijet variables." << std::endl;
    diAK8Jet_mass[0] = 0; diAK8Jet_mass[1] = 0;
    fourAK8JetMass = 0;
    if(nfatjets >3)
@@ -4176,19 +3409,19 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       double minDeltaRDisc13_AK8 = sqrt( pow(leadAK8Jets[0].DeltaR(leadAK8Jets[2]),2) + pow(leadAK8Jets[1].DeltaR(leadAK8Jets[3]),2));
       double minDeltaRDisc14_AK8 = sqrt( pow(leadAK8Jets[0].DeltaR(leadAK8Jets[3]),2) + pow(leadAK8Jets[1].DeltaR(leadAK8Jets[2]),2));
 
-      if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) - minDeltaRDisc12_AK8)<1e-5 ) 
+      if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) - minDeltaRDisc12_AK8)<1e-8 ) 
       {
          //set dijet masses
          diAK8Jet_mass[0] = (leadAK8Jets[0] +leadAK8Jets[1]).M();
          diAK8Jet_mass[1] = (leadAK8Jets[2] +leadAK8Jets[3]).M();
       }
-      else if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) -minDeltaRDisc13_AK8)<1e-5 ) 
+      else if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) -minDeltaRDisc13_AK8)<1e-8 ) 
       {
          // set dijet masses
          diAK8Jet_mass[0] = (leadAK8Jets[0] +leadAK8Jets[2]).M();
          diAK8Jet_mass[1] = (leadAK8Jets[1] +leadAK8Jets[3]).M();
       }
-      else if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) -minDeltaRDisc14_AK8)<1e-5 ) 
+      else if (  abs(min(minDeltaRDisc12_AK8, min(minDeltaRDisc13_AK8,minDeltaRDisc14_AK8)) -minDeltaRDisc14_AK8)<1e-8 ) 
       {
          //set dijet masses
          diAK8Jet_mass[0] = (leadAK8Jets[0] +leadAK8Jets[3]).M();
@@ -4199,13 +3432,14 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
 
 
 
-   
-   if(slimmedSelection)
+   if( !(runType.find("Suu") != std::string::npos) || ( (systematicType.find("JEC") != std::string::npos ) ) )  // FOR NOM SIGNAL, SAVE MORE EVENTS FOR STUDYING
    {
-      if (  (nfatjets < nAK8Cut) ||   ((nfatjet_pre < nHAK8Cut) && ((dijetMassOne < 1000.) || (dijetMassTwo < 1000.)  )  )  )  return;  // RETURN cut
+      if(slimmedSelection)
+      {
+         if (  (nfatjets < 3) ||   ((nfatjet_pre < 2) && ((dijetMassOne < 1000.) || (dijetMassTwo < 1000.)  )  )  )  return;  // RETURN cut
+      }
+      else if ((nfatjets < 2) || (nfatjet_pre < 1) )return; // RETURN cut
    }
-   else if ((nfatjets < nAK8Cut) || (nfatjet_pre < nHAK8Cut) )return; // RETURN cut
-   
    
    /////////////////////////////////////////////////
    /////// Get L1 prefiring weight for event////////
@@ -4217,19 +3451,13 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       iEvent.getByToken(prefweight_token, theprefweight ) ;
       prefiringWeight_nom =(*theprefweight);
 
-      if(systematicType == "nom")
-        {   
-            edm::Handle< double > theprefweightup;
-            iEvent.getByToken(prefweightup_token, theprefweightup ) ;
-            prefiringWeight_up =(*theprefweightup);
+      edm::Handle< double > theprefweightup;
+      iEvent.getByToken(prefweightup_token, theprefweightup ) ;
+      prefiringWeight_up =(*theprefweightup);
 
-            if(_verbose)    std::cout << "Got the up prefiring weight." << std::endl;
-
-            edm::Handle< double > theprefweightdown;
-            iEvent.getByToken(prefweightdown_token, theprefweightdown ) ;
-            prefiringWeight_down =(*theprefweightdown);
-            if(_verbose)    std::cout << "Got the down prefiring weight." << std::endl;
-        }
+      edm::Handle< double > theprefweightdown;
+      iEvent.getByToken(prefweightdown_token, theprefweightdown ) ;
+      prefiringWeight_down =(*theprefweightdown);
    }
 
 
@@ -4277,556 +3505,197 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    /////////////// calculate _pdf weights //////////////////////
    /////////////////////////////////////////////////////////////
 
-   // calculate pdf weights by hand
-    if ((doPDFWeights) || (runType.find("QCD") != std::string::npos  && systematicType == "nom"))
-    {
-
-        if (_verbose) std::cout << "Calculating pdf weights by hand." << std::endl;
-        edm::Handle<GenEventInfoProduct> evt_info;
-        if( (runType.find("MC") != std::string::npos)|| (runType.find("Suu") != std::string::npos) )
-        {
-
-            iEvent.getByToken(GeneratorToken_, evt_info);
-
-            double weightsForVar[nVars]; 
-            if (_verbose) std::cout << "Getting scale PDF (Q)." << std::endl;
-            double scalePDF = evt_info->pdf()->scalePDF; //scalePDF seems to return scale Q
-
-            if (_verbose) 
-            {
-                std::cout << "scalePDF raw = " << scalePDF << std::endl;
-                // try both interpretations:
-                std::cout << "sqrt(scalePDF) = " << sqrt(scalePDF) << std::endl;
-
-
-                auto flavors2 = nomPDF->flavors();  
-                std::cout << "Flavors: ";
-                for (int pid : flavors2) std::cout << pid << " ";
-                std::cout << "\n";
-
-                std::cout << "alphasQ(scalePDF) = " << nomPDF->alphasQ2(scalePDF)
-                         << ", alphasQ(2*scalePDF) = " << nomPDF->alphasQ2(2.0*scalePDF)
-                         << ", alphasQ(0.5*scalePDF) = " << nomPDF->alphasQ2(0.5*scalePDF) << std::endl;
-            }
-
-
-            id1 = evt_info->pdf()->id.first; //particle 1 id 
-            id2 = evt_info->pdf()->id.second; //particle 2 id
-            x1 = evt_info->pdf()->x.first;
-            x2 = evt_info->pdf()->x.second;
-            q2 = pow(scalePDF,2);
-
-
-            if(_verbose)  std::cout << "id1/id2 are" << id1 << "/" << id2 << std::endl;
-            if(_verbose)  std::cout << "x1/x2 are" << x1 << "/" << x2 << std::endl;
-
-
-            int nPDFVars = nVars; // number of replicas / PDF variations
-
-            if (nPDFVars > 0)
-            {
-
-                if(pdfSetType == "relic")
-                {
-
-                    /////////////////////////////////////////////////////////
-                    ////////////// PDF Weight via relic Method //////////////
-                    /////////////////////////////////////////////////////////
-
-                    // --- Nominal PDF and weight ---
-                    double w_nom = nomPDF->xfxQ2(id1, x1, scalePDF*scalePDF) * nomPDF->xfxQ2(id2, x2, scalePDF*scalePDF); // #########
-
-                    // --- Initialize accumulators ---
-                    double varWeightsRMS = 0.;
-                    double maxPDFWeight = 2.5; 
-                          
-
-                    // --- PDF weights ---
-                    for (int varN = 0; varN < nPDFVars; ++varN) 
-                    {
-                        // LHAPDF replica weight for PDF RMS
-                        double w_var = varPDFs[varN]->xfxQ2(id1, x1, scalePDF*scalePDF) * varPDFs[varN]->xfxQ2(id2, x2, scalePDF*scalePDF); 
-                        if (w_nom > 0) weightsForVar[varN] = std::max(0., std::min(maxPDFWeight, w_var / w_nom));
-                        else {weightsForVar[varN] = 1.0; }
-                    }
-
-                    // --- Compute RMS for PDF replicas ---
-                    double meanPDF = 0.;
-                    double nGoodRelics = 0.;
-
-                    for (int varN = 0; varN < nPDFVars; ++varN) 
-                    {
-                        if(weightsForVar[varN] <= maxPDFWeight)
-                        {
-                            meanPDF += weightsForVar[varN];
-                            nGoodRelics++;
-                        }
-                    }
-                    meanPDF /= nGoodRelics;
-
-                    varWeightsRMS = 0.;
-                    for (int varN = 0; varN < nPDFVars; ++varN)
-                    {
-                        if(weightsForVar[varN] <= maxPDFWeight) 
-                        {
-                            varWeightsRMS += pow(weightsForVar[varN] - meanPDF, 2);
-                        }
-                    }
-                    ////////// PDF WEIGHTS RMS ////////////
-                    PDFWeight_RMS_up  =  1.0 + sqrt(varWeightsRMS / nGoodRelics);
-                    PDFWeight_RMS_down = std::max(0., (1.0 - sqrt(varWeightsRMS / nGoodRelics )) );
-
-
-                    if (PDFWeight_RMS_up > 5)
-                    {
-                        std::cout << "PDFWeight_RMS_up is a large! value = " << PDFWeight_RMS_up <<std::endl;
-
-                        std::cout << "the weightsForVar values are " << std::endl;
-                        for(int iii = 0; iii< nPDFVars; iii++) std::cout << weightsForVar[iii] << std::endl;
-
-                          std::cout << "The nominal pdf value is " << w_nom << std::endl;
-                          std::cout << "The mean pdf value is " << meanPDF << std::endl;
-
-                          std::cout << "q2 / x1 / x2 / id1 / id2 are " << q2 << "/" << x1 << "/" << x2 << "/" << id1<< "/" <<id2 << std::endl;
-
-                          std::cout << "--------------- NEW EVENT ------------- " << std::endl;
-                    }
-
-                    ///////////////////////////////////////
-
-                    // alternative: calculate the PDF uncert by treating it as a gaussian 
-                    //Need the values in sorted order
-                    int arrSize = sizeof(weightsForVar) / sizeof(weightsForVar[0]);
-                    sort(weightsForVar, weightsForVar + arrSize);
-                    //double weight16 = weightsForVar[15]; 
-                    //double weight84 = weightsForVar[83];
-
-                    double thresholdMax = 2.5;
-                    double thresholdMin = 0.0;
-
-                    // Find "good" 16th percentile weight
-                    int idx16 = 15; // nominal 16th percentile index
-                    int search16 = idx16;
-                    while ((weightsForVar[search16] < thresholdMin || weightsForVar[search16] > thresholdMax) && search16 < arrSize) 
-                    {
-                        search16++;  // move to next higher weight
-                    }
-                    double weight16_good = weightsForVar[search16];
-
-                    // Find "good" 84th percentile weight
-                    int idx84 = 83; // nominal 84th percentile index
-                    int search84 = idx84;
-                    while ((weightsForVar[search84] < thresholdMin || weightsForVar[search84] > thresholdMax) && search84 >= 0) 
-                    {
-                        search84--;  // move to next lower weight
-                    }
-                    double weight84_good = weightsForVar[search84];
-
-                    // Assign fractional PDF weights
-                    PDFWeight_68perc_down = weight16_good;
-                    PDFWeight_68perc_up   = weight84_good;
-
-                    //varWeightsErr = (weight84 - weight16) / 2.0;
-                    //if (varWeightsErr < 0) varWeightsErr = 0;
-
-                    ////////// PDF WEIGHTS GAUSS ////////////
-                    //PDFWeight_68perc_up = std::max(2.5,weightsForVar[83]  );
-                    //PDFWeight_68perc_down = std::min(0., weightsForVar[15]);
-                    /////////////////////////////////////////
-                }
-
-                else if(pdfSetType == "hessian")
-                {
-
-                    /////////////////////////////////////////////////////////
-                    ///////////// PDF Weight via Hessian Method /////////////
-                    /////////////////////////////////////////////////////////
-
-                    nPDFWeights_hess = nVars;  // PDF Weight via Hessian Method
-                    if(_verbose) std::cout << "There are " << nVars << " hessian weights." << std::endl; 
-                    double w_nom_hess = nomPDF->xfxQ2(id1, x1, scalePDF *scalePDF) * nomPDF->xfxQ2(id2, x2, scalePDF*scalePDF); // #########
-
-                    for (int varN = 0; varN < nPDFWeights_hess; ++varN) 
-                    {
-                        double w_var = min(5.0,max(0.,varPDFs_hess[varN]->xfxQ2(id1, x1, scalePDF*scalePDF) * varPDFs_hess[varN]->xfxQ2(id2, x2, scalePDF*scalePDF) / w_nom_hess)); // prevents unphysical values
-                        PDFWeights_hess[varN] = w_var;         
-                        if(_verbose) std::cout << "PDF variation " << varN << " weight is " << w_var << std::endl;            
-                        h_PDFWeights_hess->Fill(varN+1,w_var); 
-                    }
-
-                }
-
-
-                /////////////////////////////////////////////////////////
-                /////////////////// QCD Scale Weights ///////////////////
-                /////////////////////////////////////////////////////////
-
-
-                 //redefine the ids to be pythia compliant
-                id1 = lhapdfPDGID(evt_info->pdf()->id.first);     
-                id2 = lhapdfPDGID(evt_info->pdf()->id.second);
-
-                double kUp = 2;
-                double kDn = 0.5;
-                float Q = evt_info->pdf()->scalePDF;
-
-                double pdf1, pdf1up, pdf1dn;
-                double pdf2, pdf2up, pdf2dn;
-                LHAPDF::usePDFMember(1,0);
-                pdf1 = std::max(0.,LHAPDF::xfx(1, x1, Q, id1)/x1);
-                pdf2 = std::max(0.,LHAPDF::xfx(1, x2, Q, id2)/x2);
-                pdf1up = std::max(0.,LHAPDF::xfx(1, x1, kUp*Q, id1)/x1);
-                pdf2up = std::max(0.,LHAPDF::xfx(1, x2, kUp*Q, id2)/x2);
-                pdf1dn = std::max(0.,LHAPDF::xfx(1, x1, kDn*Q, id1)/x1);
-                pdf2dn = std::max(0.,LHAPDF::xfx(1, x2, kDn*Q, id2)/x2);      
-
-                factWeights_up   = (pdf1up*pdf2up)/(pdf1*pdf2);
-                factWeights_down = (pdf1dn*pdf2dn)/(pdf1*pdf2);
-
-                if ((pdf1 > 0)&&(pdf2 > 0)) // if the nominal PDFs are valid here
-                {
-
-
-                   if(_verbose)
-                   {
-                      std::cout << "Q / x1 / x2 / id1 / id2 " << " / " << Q << " / " <<x1  << " / " <<x2 << " / " << id1<< " / " << id2 << std::endl; 
-                      std::cout << "pdf1 / pdf2 / pdf1up / pdf2up / pdf1dn / pdf2dn = " << pdf1<< " / " << pdf2<< " / " << pdf1up << " / " << pdf2up << " / " << pdf1dn << " / " << pdf2dn << std::endl;
-                   }
-                    //renormalization scale
-                    //compute directly from Pythia for consistency
-                    auto coup = pythia_->couplingsPtr;
-                    double alpEM = coup->alphaEM(q2);
-                    double alpEMup = coup->alphaEM(kUp*kUp*q2);
-                    double alpEMdn = coup->alphaEM(kDn*kDn*q2);
-                    double alpS = coup->alphaS(Q*Q);
-                    double alpSup = coup->alphaS(kUp*kUp*q2);
-                    double alpSdn = coup->alphaS(kDn*kDn*q2);
-
-                   if(_verbose)
-                   {
-                    std::cout << "PDFRecalculator: alpEM = " << alpEM << ", alpEMup = " << alpEMup
-                                                  << ", alpEMdn = " << alpEMdn << ", alpS = " << alpS << ", alpSup = " << alpSup
-                                                  << ", alpSdn = " << alpSdn << std::endl;
-                   }
-                    //weights require process-dependent information about number of QCD and EM vertices
-                    renormWeight_nQCD2_up = std::pow(alpEMup/alpEM, nEM_) * std::pow(alpSup/alpS, 2);
-                    renormWeight_nQCD2_down = std::pow(alpEMdn/alpEM, nEM_) * std::pow(alpSdn/alpS, 2);
-
- 
-                    renormWeight_nQCD3_up = std::pow(alpEMup/alpEM, nEM_) * std::pow(alpSup/alpS, 3);
-                    renormWeight_nQCD3_down = std::pow(alpEMdn/alpEM, nEM_) * std::pow(alpSdn/alpS, 3);
-
-                   /*
-                    renormWeight_nQCD1_up = std::pow(alpEMup/alpEM, nEM_) * std::pow(alpSup/alpS, 1);
-                    renormWeight_nQCD1_down = std::pow(alpEMdn/alpEM, nEM_) * std::pow(alpSdn/alpS, 1);
-
-                    renormWeight_nQCD4_up = std::pow(alpEMup/alpEM, nEM_) * std::pow(alpSup/alpS, 4);
-                    renormWeight_nQCD4_down = std::pow(alpEMdn/alpEM, nEM_) * std::pow(alpSdn/alpS, 4);
-
-                    renormWeight_nQCD5_up = std::pow(alpEMup/alpEM, nEM_) * std::pow(alpSup/alpS, 5);
-                    renormWeight_nQCD5_down = std::pow(alpEMdn/alpEM, nEM_) * std::pow(alpSdn/alpS, 5);
-                    */
-
-                    // calculate scale uncertainty with envelope method
-                    // --- 7-point scale variations ---
-                    double muR_factors[3] = {0.5, 1.0, 2.0};
-                    double muF_factors[3] = {0.5, 1.0, 2.0};
-
-                    scale_uncert_envelope_nQCD1_up = -1e9;    // initialize with extreme values
-                    scale_uncert_envelope_nQCD1_down = 1e9;
-
-                    scale_uncert_envelope_nQCD2_up = -1e9;    // initialize with extreme values
-                    scale_uncert_envelope_nQCD2_down = 1e9;
-
-                    scale_uncert_envelope_nQCD3_up = -1e9;    // initialize with extreme values
-                    scale_uncert_envelope_nQCD3_down = 1e9;
-
-                    ////////// SCALE ENVELOPE UNCERT ////////////
-
-                    for (int iR = 0; iR < 3; ++iR) 
-                    {
-                        for (int iF = 0; iF < 3; ++iF) 
-                        {
-
-                            double muR = muR_factors[iR];
-                            double muF = muF_factors[iF];
-
-                            // Skip the nominal point (1,1)
-                            if (muR == 1.0 && muF == 1.0) continue;
-                            if ((muR == 0.5 && muF == 2.0) || (muR == 2.0 && muF == 0.5)) continue;
-
-
-                            // fact variation
-                            double pdf1var = max(0.,LHAPDF::xfx(1, x1, muF*Q, id1)/x1);
-                            double pdf2var = max(0.,LHAPDF::xfx(1, x2, muF*Q, id2)/x2);
-
-                            double factW = (pdf1var*pdf2var)/(pdf1*pdf2);
-
-                            double alpEMvar = coup->alphaEM(muR*muR*q2);
-                            double alpSvar = coup->alphaS(muR*muR*q2);
-
-                            double renormW_nQCD1 = std::pow(alpEMvar/alpEM, nEM_) * std::pow(alpSvar/alpS, 1);
-                            double renormW_nQCD2 = std::pow(alpEMvar/alpEM, nEM_) * std::pow(alpSvar/alpS, 2);
-                            double renormW_nQCD3 = std::pow(alpEMvar/alpEM, nEM_) * std::pow(alpSvar/alpS, 3);
-
-
-                            // Total fractional weight relative to nominal
-                            double w_var_nQCD1 = factW  * renormW_nQCD1;
-                            double w_var_nQCD2 = factW  * renormW_nQCD2;
-                            double w_var_nQCD3 = factW  * renormW_nQCD3;
-
-                            // Fractional deviation relative to nominal
-                            double delta_nQCD1 = w_var_nQCD1 - 1.0;
-                            double delta_nQCD2 = w_var_nQCD2 - 1.0;
-                            double delta_nQCD3 = w_var_nQCD3 - 1.0;
-
-                            // Update envelope
-                            if ( delta_nQCD1 > scale_uncert_envelope_nQCD1_up)   scale_uncert_envelope_nQCD1_up = delta_nQCD1;
-                            if (delta_nQCD1 < scale_uncert_envelope_nQCD1_down) scale_uncert_envelope_nQCD1_down = delta_nQCD1;
-
-                            if ( delta_nQCD2 > scale_uncert_envelope_nQCD2_up)   scale_uncert_envelope_nQCD2_up = delta_nQCD2;
-                            if (delta_nQCD2 < scale_uncert_envelope_nQCD2_down) scale_uncert_envelope_nQCD2_down = delta_nQCD2;
-
-                            if (delta_nQCD3 > scale_uncert_envelope_nQCD3_up)  scale_uncert_envelope_nQCD3_up = delta_nQCD3;
-                            if (delta_nQCD3 < scale_uncert_envelope_nQCD3_down) scale_uncert_envelope_nQCD3_down = delta_nQCD3;
-                        }
-                    }
-                    scale_uncert_envelope_nQCD1_up++; scale_uncert_envelope_nQCD1_down++;
-                    scale_uncert_envelope_nQCD2_up++; scale_uncert_envelope_nQCD2_down++; // to get 1 + deviation
-                    scale_uncert_envelope_nQCD3_up++; scale_uncert_envelope_nQCD3_down++; // to get 1 + deviation
-
-
-
-                    
-                    // --- Print results ---
-                    if(_verbose) 
-                    {
-                          std::cout << "factWeights_up/down = " << factWeights_up << "/" << factWeights_down << std::endl;
-                          std::cout << "renormWeight_nQCD2_up/down = " << renormWeight_nQCD2_up << "/" << renormWeight_nQCD2_down << std::endl;
-                          std::cout << "scale_uncert_envelope_nQCD2_up/down = " << scale_uncert_envelope_nQCD2_up << "/" << scale_uncert_envelope_nQCD2_down << std::endl;
-
-                          std::cout << "PDFWeight_RMS_up/down = " << PDFWeight_RMS_up << "/" << PDFWeight_RMS_down << std::endl;
-                          std::cout << "PDF 68perc_up/down = " << PDFWeight_68perc_up << "/" << PDFWeight_68perc_down << std::endl;
-
-                    }
-
-
-
-                } // end if loop for pdf1 + pdf2 validity
-                else
-                {
-                    factWeights_up = 1.0;
-                    factWeights_down = 1.0;
-                    renormWeight_nQCD1_up = 1.0;
-                    renormWeight_nQCD1_down = 1.0;
-                    renormWeight_nQCD2_up = 1.0;
-                    renormWeight_nQCD2_down = 1.0;
-                    renormWeight_nQCD3_up = 1.0;
-                    renormWeight_nQCD3_down = 1.0;
-                    renormWeight_nQCD4_up = 1.0;
-                    renormWeight_nQCD4_down = 1.0;
-                    renormWeight_nQCD5_up = 1.0;
-                    renormWeight_nQCD5_down = 1.0;
-                    scale_uncert_envelope_nQCD1_up = 1.0;
-                    scale_uncert_envelope_nQCD2_up = 1.0;
-                    scale_uncert_envelope_nQCD2_down = 1.0;
-                    scale_uncert_envelope_nQCD3_up = 1.0;
-                    scale_uncert_envelope_nQCD3_down    = 1.0;
-                }
-
-            // end if loop for nVars > 0
-            }
-            else 
-            {
-                PDFWeight_RMS_up = 1.0;
-                PDFWeight_RMS_down = 1.0;
-                factWeights_up = 1.0;
-                factWeights_down = 1.0;
-                renormWeight_nQCD1_up = 1.0;
-                renormWeight_nQCD1_down = 1.0;
-                renormWeight_nQCD2_up = 1.0;
-                renormWeight_nQCD2_down = 1.0;
-                renormWeight_nQCD3_up = 1.0;
-                renormWeight_nQCD3_down = 1.0;
-                renormWeight_nQCD4_up = 1.0;
-                renormWeight_nQCD4_down = 1.0;
-                renormWeight_nQCD5_up = 1.0;
-                renormWeight_nQCD5_down = 1.0;
-                scale_uncert_envelope_nQCD1_up = 1.0;
-                scale_uncert_envelope_nQCD2_up = 1.0;
-                scale_uncert_envelope_nQCD2_down = 1.0;
-                scale_uncert_envelope_nQCD3_up = 1.0;
-                scale_uncert_envelope_nQCD3_down    = 1.0;
-            }
-        }
-    }
-
-     
-    // calculate the FULL PDF weights (for nom uncertainty via relic method, MC (not QCD_Pt as this lacks collections necessary for that))
-    if(doPDFWeights) 
-    {
-        if(_verbose)std::cout << "Setting PDF variables";
-
-        nPDFWeights = 0;
-        nScaleWeights = 0;
-
-        if( (runType.find("MC") != std::string::npos) || (runType.find("Suu") != std::string::npos) )
-        {
-
-            //// calculate the up and down pdf wights the "BEST" bay
-            double PDFWeightAvg = 0, PDFWeightStdDev= 0;
-            double PDFwgt, PDFWeightNom, PDFWeightFrac;
-
-            edm::Handle<LHEEventProduct> lheEventProduct;
-            iEvent.getByToken(lheEventProductToken_, lheEventProduct);
-
-
-            // PDF weight information: 
-            // -------------------------------------------------------------
-
-            // FOR QCD HT MC
-            //PDF nom == 325300
-            //Scale: ID=1002-1045, [MUR,MU=0.5/1/1.5, DynScale=1-4]
-            //Renomalization Scale: ID = 1006 (MU_R=2.0), 1011 (MU_R=0.5) 
-            // Factorization Scale: ID = 1016 (MU_F=2.0), 1021 (MU_F=0.5) 
-            // variations 325301-325402 = PDF: ID=1047-1148
-
-
-            // For TTJets MC:
-            //PDF nom = 325300 = ID 1048
-            // variations 325501-325600 = PDF, ID=1049-1148
-
-            // For signal: 
-            // PDF nom = 325500
-            // Scale: ID=1002-1045
-            //Renormalization scale: ID = 1006 (MU_R=2.0), 1011 (MU_R=0.5)
-            // Factorization Scale: ID = 1016 (MU_F=2.0), 1026 (MU_F=0.5) 
-            // variations 325301-325402 = PDF: ID=1049-1148
-
-
-            // for WJets: (appears to be the same as QCD)
-            // PDF nom = 325300 = ID 1048 (325301-325402 ) 
-            // Scale: ID=1049-1150
-
-
-            //PDFWeightNom = lheEventProduct->originalXWGTUP();
-            PDFWeightNom = lheEventProduct->weights()[0].wgt;
-
-
-            if(pdfSetType == "relic")
-            // ---------------------------------------------------------------
-            {
-
-                unsigned int PDFstart, PDFend;
-                if(runType.find("QCD") != std::string::npos)
-                {
-                    PDFstart = 46; // corresponding to <weight MUF="1.0" MUR="1.0" PDF="325301" id="1047"> PDF=325300 MemberID=1 </weight>
-                    PDFend = 147;  // cooresponding to <weight MUF="1.0" MUR="1.0" PDF="325402" id="1148"> PDF=325300 MemberID=102 </weight>
-                }
-                else if( runType.find("Suu") != std::string::npos )
-                {
-                    PDFstart = 48;
-                    PDFend = 147;
-                }
-                else if( runType.find("TTJets"))
-                {  
-                    PDFstart = 48;   // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
-                    PDFend  = 147; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
-                }
-                else if( runType.find("WJets"))
-                {  
-                    PDFstart = 48;   // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
-                    PDFend  = 149; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
-                }
-                else  // generic (won't work for powheg samples like TTTo)
-                {  
-                    PDFstart = 48;   // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
-                    PDFend  = 149; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
-                }
-
-
-                for(unsigned int iii = 0; iii < lheEventProduct->weights().size(); iii++) 
-                {
-                    //std::cout<<"Systematic "<<iii<<" ID: "<<lheEventProduct->weights()[iii].id<<", value "<<lheEventProduct->weights()[iii].wgt<<", ratio "<<lheEventProduct->weights()[iii].wgt/PDFWeightNom<<std::endl;
-                    if( iii >= PDFstart && iii < PDFend) 
-                    {
-                        PDFwgt = lheEventProduct->weights()[iii].wgt;
-                        PDFWeightFrac = PDFwgt/PDFWeightNom;
-                        PDFWeightAvg += PDFWeightFrac;
-                    }
-                }
-
-                PDFWeightAvg = PDFWeightAvg/(PDFend - PDFstart);
-                for (unsigned int i=PDFstart; i < PDFend; ++i) 
-                {
-                    PDFwgt = lheEventProduct->weights()[i].wgt;
-                    PDFWeightFrac = PDFwgt/(PDFWeightNom);
-                    PDFWeightStdDev += pow((PDFWeightFrac - PDFWeightAvg),2);
-                }
-                PDFWeightStdDev = sqrt(PDFWeightStdDev/(PDFend - PDFstart - 1)); 
-                PDFWeightUp_replica     = 1.0 + PDFWeightStdDev;
-                PDFWeightDown_replica   = 1.0 - PDFWeightStdDev;
-            }
-
-            //// calculate the renormalization and factorizations the "Ben" way
-
-            // This is the way BEST is doing it
-            QCDRenormalization_up_BEST      = lheEventProduct->weights()[5].wgt /PDFWeightNom;   // muF = 1.0, muR = 2.0 
-            QCDRenormalization_down_BEST    = lheEventProduct->weights()[10].wgt/PDFWeightNom;   // muF = 1.0, muR = 0.5
-            QCDFactorization_up_BEST        = lheEventProduct->weights()[15].wgt/PDFWeightNom;   // muF = 2.0, muR = 1.0
-            QCDFactorization_down_BEST      = lheEventProduct->weights()[30].wgt/PDFWeightNom;   // muF = 0.5, muR = 1.0
-
-
-            if(_verbose)std::cout << QCDRenormalization_up_BEST << " " << QCDRenormalization_down_BEST << " " << QCDFactorization_up_BEST << " " << QCDFactorization_down_BEST << std::endl;
-            if(_verbose)std::cout << "weight: " << lheEventProduct->weights()[5].wgt << ", nom weight: " << PDFWeightNom << std::endl;
-
-            // envelope indices are the same for QCD and TTbarMC  
-            scale_envelope[0] = lheEventProduct->weights()[15].wgt; // index 0: muF = 2.0, muR = 1.0 : <weight MUF="2.0" MUR="1.0" PDF="325300" id="1016"> MUF=2.0 </weight>
-            scale_envelope[1] = lheEventProduct->weights()[30].wgt; // index 1: muF = 0.5, muR = 1.0 : <weight MUF="0.5" MUR="1.0" PDF="325300" id="1031"> MUF=0.5 </weight>
-            scale_envelope[2] = lheEventProduct->weights()[20].wgt; // index 2: muF = 2.0, muR = 2.0 : <weight MUF="2.0" MUR="2.0" PDF="325300" id="1021"> MUR=2.0 MUF=2.0   </weight>
-            scale_envelope[3] = lheEventProduct->weights()[5].wgt;    // index 3: muF = 1.0, muR = 2.0 : <weight MUF="1.0" MUR="2.0" PDF="325300" id="1006"> MUR=2.0  </weight>
-            scale_envelope[4] = lheEventProduct->weights()[40].wgt; // index 4: muF = 0.5, muR = 0.5 : <weight MUF="0.5" MUR="0.5" PDF="325300" id="1041"> MUR=0.5 MUF=0.5   </weight>
-            scale_envelope[5] = lheEventProduct->weights()[10].wgt; // index 5: muF = 1.0, muR = 0.5 : <weight MUF="1.0" MUR="0.5" PDF="325300" id="1011"> MUR=0.5 </weight>
-            scale_envelope[6] = lheEventProduct->weights()[25].wgt; // index 6: muF = 2.0, muR = 0.5 : <weight MUF="2.0" MUR="0.5" PDF="325300" id="1026"> MUR=0.5 MUF=2.0   </weight>  : this shouldn't be needed
-            scale_envelope[7] = lheEventProduct->weights()[35].wgt; // index 7: muF = 0.5, muR = 2.0 : <weight MUF="0.5" MUR="2.0" PDF="325300" id="1036"> MUR=2.0 MUF=0.5   </weight> this shouldn't be needed
-            scale_envelope[8] = lheEventProduct->weights()[0].wgt;    // index 8L muF = 1.0, muR = 1.0 : <weight MUF="1.0" MUR="1.0" PDF="325300" id="1001"> </weight> NOMINAL: this might be needed for normalization
-            scale_envelope[9] = lheEventProduct->originalXWGTUP();    // nominal (central?) PDF weight
-
-
-            ////////////////////////////////////////////////////////////////////////////////////
-            // use the "envelope" method to find the largest deviation from the nominal weight
-            ////////////////////////////////////////////////////////////////////////////////////
-
-            double max_deviation_up = -9e10;
-            double max_deviation_down = -9e10;
-
-            for (int iii = 0; iii < 8; iii++) 
-            {
-                // Calculate the fractional deviation from the nominal weight
-                double deviation = std::abs(scale_envelope[iii] - scale_envelope[8]) / scale_envelope[8];
-
-                // Update max_deviation_up or max_deviation_down based on the direction of the deviation
-                if (scale_envelope[iii] > scale_envelope[8]) 
-                {
-                    // Positive deviation (scale-up)
-                    max_deviation_up = std::max(max_deviation_up, deviation);
-                } 
-                else 
-                {
-                    // Negative deviation (scale-down)
-                    max_deviation_down = std::max(max_deviation_down, deviation);
-                }
-            }
-
-            // Now assign the results to the uncertainties
-            PDFWeights_envelope_scale_uncertainty_up  = 1.0 + max_deviation_up;
-            PDFWeights_envelope_scale_uncertainty_down = 1.0 - max_deviation_down;
-        }
+   if(doPDFWeights)
+   {
+      if(_verbose)std::cout << "Setting PDF variables";
       
-    }
-    if(_verbose)  std::cout << "Finished pdf weight calculation." << std::endl;
+      edm::Handle<GenEventInfoProduct> evt_info;
+      iEvent.getByToken(GeneratorToken_, evt_info);
 
-  
+      nPDFWeights   = 0;
+      nScaleWeights = 0;
+      
+      if( (runType.find("QCD") != std::string::npos) || (runType.find("TTJets") != std::string::npos)|| (runType.find("Suu") != std::string::npos) )
+      {
+
+         double factorizWeights_up[nVars];
+         double factorizWeights_down[nVars];
+         double weightsForVar[nVars]; 
+
+
+         //// calculate the up and down pdf wights the "BEST" bay
+         double PDFWeightAvg = 0, PDFWeightStdDev= 0;
+         double PDFwgt, PDFWeightNom, PDFWeightFrac;
+
+         edm::Handle<LHEEventProduct> lheEventProduct;
+         iEvent.getByToken(lheEventProductToken_, lheEventProduct);
+
+
+         // PDF weight information: 
+         // -------------------------------------------------------------
+
+         // FOR QCD MC
+         //PDF nom == 325300
+         //Scale: ID=1002-1045, [MUR,MU=0.5/1/1.5, DynScale=1-4]
+         //Renomalization Scale: ID = 1006 (MU_R=2.0), 1011 (MU_R=0.5) 
+         // Factorization Scale: ID = 1016 (MU_F=2.0), 1021 (MU_F=0.5) 
+         // variations 325301-325402 = PDF: ID=1047-1148
+
+
+         // For TTJets MC:
+         //PDF nom = 325300 = ID 1048
+         // variations 325501-325600 = PDF, ID=1049-1148
+
+         // For signal: 
+         // PDF nom = 325500
+         // Scale: ID=1002-1045
+         //Renormalization scale: ID = 1006 (MU_R=2.0), 1011 (MU_R=0.5)
+         // Factorization Scale: ID = 1016 (MU_F=2.0), 1026 (MU_F=0.5) 
+         // variations 325301-325402 = PDF: ID=1049-1148
+
+         // ---------------------------------------------------------------
+
+         unsigned int PDFstart, PDFend;
+         if(runType.find("QCD") != std::string::npos)
+         {
+            PDFstart = 46; // corresponding to <weight MUF="1.0" MUR="1.0" PDF="325301" id="1047"> PDF=325300 MemberID=1 </weight>
+            PDFend = 147;  // cooresponding to <weight MUF="1.0" MUR="1.0" PDF="325402" id="1148"> PDF=325300 MemberID=102 </weight>
+         }
+         else if( runType.find("Suu") != std::string::npos )
+         {
+            PDFstart = 48;
+            PDFend = 147;
+         }
+         else if( runType.find("TTJets"))
+         {     
+             PDFstart =  48;  // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
+             PDFend   =  149; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
+         }
+         else   // generic (won't work for powheg samples like TTTo)
+         {     
+             PDFstart =  48;  // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
+             PDFend   =  149; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
+         }
+            
+         PDFWeightNom = lheEventProduct->originalXWGTUP();
+
+         for(unsigned int iii = 0;  iii < lheEventProduct->weights().size();  iii++) {
+            //std::cout<<"Systematic "<<iii<<" ID: "<<lheEventProduct->weights()[iii].id<<", value "<<lheEventProduct->weights()[iii].wgt<<", ratio "<<lheEventProduct->weights()[iii].wgt/PDFWeightNom<<std::endl;
+            if( iii >= PDFstart && iii < PDFend) 
+            {
+               PDFwgt = lheEventProduct->weights()[iii].wgt;
+               PDFWeightFrac = PDFwgt/PDFWeightNom;
+               PDFWeightAvg += PDFWeightFrac;
+            }
+         }
+
+         PDFWeightAvg = PDFWeightAvg/(PDFend - PDFstart);
+         for (unsigned int i=PDFstart; i < PDFend; ++i) 
+         {
+            PDFwgt = lheEventProduct->weights()[i].wgt;
+            PDFWeightFrac = PDFwgt/(PDFWeightNom);
+            PDFWeightStdDev += std::pow((PDFWeightFrac - PDFWeightAvg),2);
+         }
+         PDFWeightStdDev = sqrt(PDFWeightStdDev/(PDFend - PDFstart - 1)); 
+         PDFWeightUp = 1.0 + PDFWeightStdDev;
+         PDFWeightDown = 1.0 - PDFWeightStdDev;
+
+         //// calculate the renormalization and factorizations the "Ben" way
+
+         // This is the way BEST is doing it
+         QCDRenormalization_up_BEST      = lheEventProduct->weights()[5].wgt /PDFWeightNom;   // muF = 1.0, muR = 2.0
+         QCDRenormalization_down_BEST    = lheEventProduct->weights()[10].wgt/PDFWeightNom;  // muF = 1.0, muR = 0.5
+         QCDFactorization_up_BEST        = lheEventProduct->weights()[15].wgt/PDFWeightNom;  // muF = 2.0, muR = 1.0
+         QCDFactorization_down_BEST      = lheEventProduct->weights()[30].wgt/PDFWeightNom;  // muF = 0.5, muR = 1.0
+
+         // envelope indices are the same for QCD and TTbarMC   
+         scale_envelope[0] = lheEventProduct->weights()[15].wgt;  // index 0: muF = 2.0, muR = 1.0 : <weight MUF="2.0" MUR="1.0" PDF="325300" id="1016"> MUF=2.0  </weight>
+         scale_envelope[1] = lheEventProduct->weights()[30].wgt;  // index 1: muF = 0.5, muR = 1.0 : <weight MUF="0.5" MUR="1.0" PDF="325300" id="1031"> MUF=0.5  </weight>
+         scale_envelope[2] = lheEventProduct->weights()[20].wgt;  // index 2: muF = 2.0, muR = 2.0 : <weight MUF="2.0" MUR="2.0" PDF="325300" id="1021"> MUR=2.0 MUF=2.0  </weight>
+         scale_envelope[3] = lheEventProduct->weights()[5].wgt;   // index 3: muF = 1.0, muR = 2.0 : <weight MUF="1.0" MUR="2.0" PDF="325300" id="1006"> MUR=2.0  </weight>
+         scale_envelope[4] = lheEventProduct->weights()[40].wgt;  // index 4: muF = 0.5, muR = 0.5 : <weight MUF="0.5" MUR="0.5" PDF="325300" id="1041"> MUR=0.5 MUF=0.5  </weight>
+         scale_envelope[5] = lheEventProduct->weights()[10].wgt;  // index 5: muF = 1.0, muR = 0.5 : <weight MUF="1.0" MUR="0.5" PDF="325300" id="1011"> MUR=0.5  </weight>
+         scale_envelope[6] = lheEventProduct->weights()[25].wgt;  // index 6: muF = 2.0, muR = 0.5 : <weight MUF="2.0" MUR="0.5" PDF="325300" id="1026"> MUR=0.5 MUF=2.0  </weight>   : this shouldn't be needed
+         scale_envelope[7] = lheEventProduct->weights()[35].wgt;  // index 7: muF = 0.5, muR = 2.0 : <weight MUF="0.5" MUR="2.0" PDF="325300" id="1036"> MUR=2.0 MUF=0.5  </weight> this shouldn't be needed
+         scale_envelope[8] = lheEventProduct->weights()[0].wgt;    // index 8L muF = 1.0, muR = 1.0 : <weight MUF="1.0" MUR="1.0" PDF="325300" id="1001">  </weight> NOMINAL: this might be needed for normalization
+         scale_envelope[9] = lheEventProduct->originalXWGTUP();    // nominal (central?) PDF weight
+
+
+
+         const int VAR_UP = 1;
+         const int VAR_DOWN = -1;
+         int nQCD = 0;
+
+         // init stuff
+
+         PDFWeights_factWeightsRMS_up = 0.;
+         PDFWeights_factWeightsRMS_down = 0.;
+         varWeightsRMS = 0;
+
+         edm::Handle<GenEventInfoProduct> evt_info;
+         iEvent.getByToken(GeneratorToken_, evt_info);
+
+         double scalePDF = evt_info->pdf()->scalePDF; //scalePDF seems to return scale q -> this was previously called q2
+         id1 = evt_info->pdf()->id.first; //particle 1 id 
+         id2 = evt_info->pdf()->id.second; //particle 2 id
+         x1 = evt_info->pdf()->x.first;
+         x2 = evt_info->pdf()->x.second;
+         q2 = pow(scalePDF,2);
+         if(_verbose)std::cout << "id1/id2/x1/x2/scalePDF are" << id1<< "/" <<id2 << "/" << x1<< "/" << x2<< "/" << scalePDF<< std::endl;
+
+         alphas           = calcAlphas(scalePDF);
+         PDFWeights_renormWeight_up = calcRenormWeight(scalePDF, VAR_UP, nQCD); 
+         PDFWeights_renormWeight_down = calcRenormWeight(scalePDF, VAR_DOWN, nQCD); 
+
+         // what are my PDF weights related to what he has here? 
+
+         for (int varN = 0; varN < nVars; varN++) 
+         {
+            factorizWeights_up[varN]   = calcFactorizWeight(varPDFs[varN], id1, id2, x1, x2, scalePDF, VAR_UP);   
+            factorizWeights_down[varN] = calcFactorizWeight(varPDFs[varN], id1, id2, x1, x2, scalePDF, VAR_DOWN); 
+
+            if(_verbose)std::cout << "varN is " << varN << ", the up/down factorizWeights is " << factorizWeights_up[varN]<< "/" <<factorizWeights_down[varN] << std::endl;
+
+            PDFWeights_factWeightsRMS_up += (factorizWeights_up[varN] * factorizWeights_up[varN]);
+            PDFWeights_factWeightsRMS_down += (factorizWeights_down[varN] * factorizWeights_down[varN]);
+            // weight using https://lhapdf.hepforge.org/group__reweight__double.html, one per replica.
+            weightsForVar[varN] = LHAPDF::weightxxQ(id1, id2, x1, x2, scalePDF, nomPDF, varPDFs[varN]); 
+            if(_verbose)std::cout << "weightsForVar[varN] is " << weightsForVar[varN] << std::endl;
+            varWeightsRMS += (weightsForVar[varN] * weightsForVar[varN]);
+            if(_verbose)std::cout << "varWeightsRMS increased by " << varWeightsRMS << std::endl;
+         }
+
+         //Calculate the RMS's
+         PDFWeights_factWeightsRMS_up /= (1.0*nVars);
+         PDFWeights_factWeightsRMS_down /= (1.0*nVars); 
+
+         PDFWeights_factWeightsRMS_up = sqrt(PDFWeights_factWeightsRMS_up);
+
+         PDFWeights_factWeightsRMS_down = sqrt(PDFWeights_factWeightsRMS_down);
+
+         if(_verbose)std::cout << "PDFWeights_factWeightsRMS_up/PDFWeights_factWeightsRMS_down" << PDFWeights_factWeightsRMS_up<< "/" <<PDFWeights_factWeightsRMS_down << std::endl;
+
+         varWeightsRMS /= nVars;
+         varWeightsRMS = sqrt(varWeightsRMS);
+
+
+         //Calculated the error on the varWeightsRMS according to eqn 6.4 from https://arxiv.org/pdf/2203.05506.pdf
+         //Need the values in sorted order
+         int arrSize = sizeof(weightsForVar) / sizeof(weightsForVar[0]);
+         sort(weightsForVar, weightsForVar + arrSize);
+         double weight16 = weightsForVar[15]; // what's the deal with these indices?
+         double weight84 = weightsForVar[83];
+         varWeightsErr = (weight84 - weight16) / 2.0;
+         if (varWeightsErr < 0) varWeightsErr = 0;
+ 
+         if(_verbose)std::cout << " The PDFWeights_alphas is " << alphas << "." << std::endl;
+         if(_verbose)std::cout << " The renormWeights up/down is " <<renormWeights[0] << "/" << renormWeights[1] << "." << std::endl;
+         if(_verbose)std::cout << " The nVars is " <<nVars << "." << std::endl;
+         if(_verbose)std::cout << " The varWeightsRMS is " <<varWeightsRMS << "." << std::endl;
+         if(_verbose)std::cout << " The varWeightsErr is " <<varWeightsErr << "." << std::endl;
+      }
+      
+   }
 
    
    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -4834,76 +3703,9 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    //     This is the point where superjets will be formed !
 
+   if(_verbose)std::cout << "before cluster" << std::endl;
    /////calculate COM frame boost
    TVector3 totJetBeta = TVector3(tot_jet_px/tot_jet_E,tot_jet_py/tot_jet_E ,tot_jet_pz/tot_jet_E); 
- std::vector<fastjet::PseudoJet> jetsFJ_jet0;
-
-
-    fastjet::JetDefinition jet_def0;
-    fastjet::ClusterSequence cs_jet0;
-
-    /// Split here depending on the clustering method used
-        // method 1 (=skipReclustering): do not reclustering in the MPP frame. This means the SJ mass and diSJ masses come directly from the lab-frame jet masses
-        // method 2:                     do CA8 jet reclustering in the MPP frame using the particles from the selected lab-frame AK8 jets (boosted to the MPP frame). This means SJ and diSJ masses are "slimmed" relative to the lab-frame jets. 
-
-    if(skipReclustering)
-    {
-        // need to create vector of PseudoJetss (each with corresponding PseudoJet particles) boosted to the COM frame
-        // jets need to be sorted by decreasing COM energy
-
-        std::vector<double> jet_energies;
-        std::vector<fastjet::PseudoJet> jetsFJ_jet0_;
-
-        int nAK8_ = 0;
-        for(auto iJet = fatJets->begin(); iJet!=fatJets->end(); iJet++)
-        {
-            if((sqrt(pow(iJet->mass(),2)+pow(iJet->pt(),2)) < ET_cut) || (!(iJet->isPFJet())) || (!isgoodjet(iJet->eta(),iJet->neutralHadronEnergyFraction(), iJet->neutralEmEnergyFraction(),iJet->numberOfDaughters(),iJet->chargedHadronEnergyFraction(),iJet->chargedMultiplicity(),iJet->muonEnergyFraction(),iJet->chargedEmEnergyFraction(),nAK8_ )) || (iJet->mass()< 0.)) continue; //userFloat("ak8PFJetsPuppiSoftDropMass")
-
-            std::vector<fastjet::PseudoJet> jet_parts; 
-
-            double jec = iJet->pt() / iJet->correctedP4("Uncorrected").pt();
-
-            for (unsigned int iii=0; iii<iJet->numberOfDaughters();iii++)  // get all jet particles
-            {  
-                const reco::Candidate* iJ = iJet->daughter(iii);
-                if(_verbose) std::cout << "daughter particle " << iii << " has pt = " << iJ->pt() << std::endl;
-
-                const pat::PackedCandidate* candJetbegin = (pat::PackedCandidate*) iJ;
-                if(_verbose) std::cout << "PackedCadidate daughter particle " << iii << " has pt = " << candJetbegin->pt() << std::endl;
-                double puppiweight = candJetbegin->puppiWeight();
-                if(_verbose) std::cout << "PUPPI weight is " << puppiweight << std::endl;
-                // boost jet particle
-
-                TLorentzVector part_boosted = jec*AK8_jet_corrections[nAK8_]*puppiweight*TLorentzVector( iJ->px(), iJ->py(), iJ->pz(), iJ->energy() ) ;
-                part_boosted.Boost(-totJetBeta.X(),-totJetBeta.Y(),-totJetBeta.Z());
-                jet_parts.push_back(fastjet::PseudoJet( part_boosted.Px(), part_boosted.Py(), part_boosted.Pz(), part_boosted.E()   ));
-            }
-            fastjet::PseudoJet cand_jet = fastjet::join(jet_parts);
-            jet_energies.push_back(cand_jet.E());
-            jetsFJ_jet0_.push_back(cand_jet); 
-
-            nAK8_++;
-        }
-        // sort jets by decreasing energy (for more easy diagnostics and comparison to other method )
-        std::vector<std::size_t> idx(jetsFJ_jet0_.size());
-        std::iota(idx.begin(), idx.end(), 0);
-
-        std::sort(idx.begin(), idx.end(),
-                  [&](std::size_t i, std::size_t j) 
-                  {
-                      return jet_energies[i] > jet_energies[j];
-                  });
-
-        // apply permutation
-        jetsFJ_jet0.reserve(jetsFJ_jet0_.size());
-
-        for (auto i : idx) 
-        {
-            jetsFJ_jet0.push_back(jetsFJ_jet0_[i]);
-        }
-    }
-    else
-    {
 
 
    //////////boost all jet particles into MPP (or COM) frame
@@ -4933,32 +3735,13 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    // shedding particles happens here -> can change this energy threshold 
 
    std::vector<fastjet::PseudoJet> jetsFJ_jet0 = fastjet::sorted_by_E(cs_jet0.inclusive_jets(0.));
-    }
-     nMPP_CA8_jets = 0;
    double MPP_COM2_px = 0,MPP_COM2_py=0,MPP_COM2_pz =0,MPP_COM2_E = 0;
    int counter = 0;
-    int nMPPAK8 = 0;
    int nReclustered_CA8 = 0;
    std::vector<TLorentzVector> candsBoostedTLV;   
    for (auto iJet=jetsFJ_jet0.begin(); iJet<jetsFJ_jet0.end(); iJet++)                             
-   {   if(iJet->constituents().size() < 5) continue; // drop low-multiplicity "jets"
-      if(_verbose)std::cout << "Looking at MPP AK8 jet " << nMPPAK8 << " with p4 " << iJet->px()  << "/" << iJet->py()  << "/" << iJet->pz()  << "/" << iJet->E()  << "/" << iJet->m()  << std::endl;
-        nReclustered_CA8++; // if(iJet->E() > 250.) 
-
-        if(iJet->E() > 0.) 
-        {
-            if(_verbose) std::cout << "Getting MPP_CA8_mass" << std::endl;
-
-            MPP_CA8_mass_[nMPP_CA8_jets] = iJet->m();  
-
-            TLorentzVector CA8_jet_to_lab(iJet->px(),iJet->py(),iJet->pz(),iJet->E()); 
-            CA8_jet_to_lab.Boost(totJetBeta.X(),totJetBeta.Y(),totJetBeta.Z()); /// boost BACK to lab frame
-            MPP_CA8_pt[nMPP_CA8_jets] = CA8_jet_to_lab.Pt();  
-
-            if(_verbose) std::cout << "MPP_CA8_nParts" << std::endl;
-            //MPP_CA8_nParts[nMPP_CA8_jets] = iJet->constituents().size();
-            nMPP_CA8_jets++;
-        }
+   {   
+      if(iJet->E() > 250.) nReclustered_CA8++;
       if (iJet->constituents().size() > 0)
       {
          for(auto iDaughter = iJet->constituents().begin(); iDaughter != iJet->constituents().end(); iDaughter++)
@@ -4970,73 +3753,8 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          }
       }
       MPP_COM2_px+= iJet->px(); MPP_COM2_py+= iJet->py(); MPP_COM2_pz+=iJet->pz() ; MPP_COM2_E+=iJet->E() ;
-      nMPPAK8++;
    }
- if(_verbose) std::cout << "About to sort MPP_CA8_mass vector for diagnostics." <<  std::endl;
-
-    int pt_indices_[nMPP_CA8_jets];
-    std::iota(pt_indices_, pt_indices_ + nMPP_CA8_jets, 0); 
-
-
-    std::sort(pt_indices_, pt_indices_ + nMPP_CA8_jets, 
-    [this](int i, int j) {
-        return MPP_CA8_pt[i] > MPP_CA8_pt[j]; // Sort Ascending
-    }
-    );
-
-    for (int i = 0; i < nMPP_CA8_jets; ++i) 
-    {
-        MPP_CA8_mass[i] = MPP_CA8_mass_[pt_indices_[i]];
-    }
-
-    // sort both of these by the pt
-    //std::sort(MPP_CA8_mass, MPP_CA8_mass + nMPP_CA8_jets, std::greater<double>());
-    std::sort(MPP_CA8_pt, MPP_CA8_pt + nMPP_CA8_jets, std::greater<double>());
-    //std::sort(MPP_CA8_nParts, MPP_CA8_nParts + nMPP_CA8_jets, std::greater<double>());
-
-
-
-    if( _verbose &&  systematicType == "nom") 
-    {    
-
-        std::cout << "-------------- new event -----------------" << std::endl;
-        for(int iii=0; iii< nfatjets; iii++)
-        {
-            std::cout << "lab-frame jet pt for jet     " << iii << " (by pt)    is " << jet_pt_by_pt[iii] << std::endl;
-            std::cout << "lab-frame jet mass for jet   " << iii << " (by mass)   is " << jet_mass_by_mass[iii] << std::endl;
-            //std::cout << "lab-frame jet nparts for jet " << iii << " (by nparts) is " << jet_nParts_by_mass[iii] << std::endl;
-
-        }
-
-        for(int iii=0; iii< nMPP_CA8_jets; iii++)
-        {
-            std::cout << "MPP-frame jet pt for jet     " << iii << " (by pt)    is " << MPP_CA8_pt[iii] << std::endl;
-            std::cout << "MPP-frame jet mass for jet   " << iii << " (by mass)   is " << MPP_CA8_mass[iii] << std::endl;
-            //std::cout << "MPP-frame jet nparts for jet " << iii << " (by nparts) is " << MPP_CA8_nParts[iii] << std::endl;
-
-        }
-    }
-
-
-
-
-    if(_verbose) std::cout << "Calculatig NJet Mass" <<  std::endl;
-
-    NJetMass = sqrt(pow(selected_AK8_E,2)-pow(selected_AK8_px,2)-pow(selected_AK8_py,2)-pow(selected_AK8_pz,2));
-    NJetPt = sqrt(pow(selected_AK8_px,2)+pow(selected_AK8_py,2));
-
-    smallestNJets = std::min(nMPP_CA8_jets, nfatjets);
-
-    if(_verbose) std::cout << "Calculating percent differences between lab and MPP frame AK8 jets." <<  std::endl;
-
-    for (int iii = 0; iii<smallestNJets; iii++)
-    {
-        jet_pt_perc_diff[iii] = (jet_pt_by_pt[iii] - MPP_CA8_pt[iii]   ) / jet_pt_by_pt[iii];
-        jet_mass_perc_diff[iii] = (jet_mass_by_mass[iii] - MPP_CA8_mass[iii]   ) / jet_mass_by_mass[iii];
-        //nParts_perc_diff[iii] = ((double)(jet_nParts_by_mass[iii] - MPP_CA8_nParts[iii]   )) / ((double)jet_nParts_by_mass[iii]);
-    }
-
-    if(_verbose)std::cout << "In this event, there were " << nfatjets << " lab frame AK8 jets selected, and " << nReclustered_CA8 << " reclustered MPP frame CA jets w/ E> 250 GeV" << std::endl;
+   if(_verbose)std::cout << "In this event, there were " << nfatjets << " lab frame AK8 jets selected, and " << nReclustered_CA8 << " reclustered MPP frame CA jets w/ E> 250 GeV" << std::endl;
 
     Thrust thrust_(candsBoosted.begin(), candsBoosted.end()); //thrust axis in COM frame
     math::XYZVector thrustAxis = thrust_.axis();
@@ -5053,7 +3771,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
 
     for (auto iJet=jetsFJ_jet0.begin(); iJet<jetsFJ_jet0.end(); iJet++)                             
     {
-       if(iJet->constituents().size() < 2) continue;
         TLorentzVector candJet(iJet->px(),iJet->py(),iJet->pz(),iJet->E());
         TVector3 candJet_vec = candJet.Vect();
         double cosAngle = cos(candJet_vec.Angle(thrust_vector));
@@ -5145,16 +3862,11 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    ///// selectedAK8_TLV are now boosted!!
 
     //get vector of pseudo jet particles for all particles in each superjet, one per superjet
-     // Also calculate the superjet and disuperjet masses from the corresponding lab-frame frame jets (which have here been boosted to the MPP frame)
-    double diSuperJet_E = 0,     diSuperJet_px = 0,diSuperJet_py = 0,diSuperJet_pz =0;
-    double diSuperJet_E_300 = 0, diSuperJet_px_300 = 0,diSuperJet_py_300 = 0,diSuperJet_pz_300 =0;
-    double SJ_mass_E[2] = {0,0}, SJ_mass_px[2] = {0,0}, SJ_mass_py[2] = {0,0},SJ_mass_pz[2] ={0,0};
     for (auto iJet=jetsFJ_jet0.begin(); iJet<jetsFJ_jet0.end(); iJet++)                             
     {   
-      if(iJet->constituents().size() < 5) continue; // drop single particle "jets"
         TLorentzVector candJet(iJet->px(),iJet->py(),iJet->pz(),iJet->E());
 
-        int SJMatch = 1e5;
+        int SJMatch = 0;
         if      (isMatchedtoSJ(posSuperJet,candJet)) SJMatch = 1;
         else if (isMatchedtoSJ(negSuperJet,candJet)) SJMatch = 2;
         else if(SJMatch == 0) std::cout << "Something didn't work... " << std::endl;
@@ -5169,13 +3881,6 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
                 else if(SJMatch==2)superJetTwoLV.push_back(TLorentzVector(iJ->px(),iJ->py(),iJ->pz(),iJ->E()));
             }
          }        
-         diSuperJet_px+= iJet->px(); diSuperJet_py+= iJet->py(); diSuperJet_pz+= iJet->pz(); diSuperJet_E+= iJet->E();
-        SJ_mass_px[SJMatch-1]+= iJet->px(); SJ_mass_py[SJMatch-1]+= iJet->py(); SJ_mass_pz[SJMatch-1]+= iJet->pz(); SJ_mass_E[SJMatch-1]+= iJet->E();
-
-        if(iJet->E() > 300.)
-        {
-            diSuperJet_px_300+= iJet->px(); diSuperJet_py_300+= iJet->py(); diSuperJet_pz_300+= iJet->pz(); diSuperJet_E_300+= iJet->E();
-        }
    }
 
    for(auto iPart = superJetOneLV.begin(); iPart != superJetOneLV.end(); iPart++)
@@ -5205,7 +3910,8 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    tot_nAK4_70 = 0; 
    tot_nAK4_50 = 0;
    tot_mpp_AK4 = 0;
-
+   double diSuperJet_E = 0, diSuperJet_px = 0,diSuperJet_py = 0,diSuperJet_pz =0;
+   double diSuperJet_E_100 = 0, diSuperJet_px_100 = 0,diSuperJet_py_100 = 0,diSuperJet_pz_100 =0;
    if(_verbose)std::cout << "about to loop over superjets" << std::endl;
 
    for(auto iSJ = superJets.begin();iSJ!= superJets.end();iSJ++)
@@ -5241,11 +3947,13 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       if (nSuperJets == 0)
       {
          SJ1_BEST_scores = static_cast<double> (BESTScores[0]);
+         
          SJ1_decision = decision;
       }
       else if (nSuperJets == 1)
       {
          SJ2_BEST_scores = static_cast<double> (BESTScores[0]);
+         
          SJ2_decision = decision;
       } 
 
@@ -5255,9 +3963,9 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       for(auto iP = iSJ->begin();iP != iSJ->end();iP++)
       {
          superJetpx+=iP->px();superJetpy+=iP->py();superJetpz+=iP->pz();superJetE +=iP->E();
-     //   diSuperJet_E +=iP->E();diSuperJet_px+=iP->px();diSuperJet_py+=iP->py();diSuperJet_pz+=iP->pz();
+         diSuperJet_E +=iP->E();diSuperJet_px+=iP->px();diSuperJet_py+=iP->py();diSuperJet_pz+=iP->pz();
       }
-     // superJet_mass[nSuperJets] = sqrt(pow(superJetE,2)-pow(superJetpx,2)-pow(superJetpy,2)-pow(superJetpz,2));
+      superJet_mass[nSuperJets] = sqrt(pow(superJetE,2)-pow(superJetpx,2)-pow(superJetpy,2)-pow(superJetpz,2));
       TLorentzVector superJetTLV(superJetpx,superJetpy,superJetpz,superJetE);    //Lorentz vector representing jet axis -> now minimize the parallel momentum
 
       std::vector<fastjet::PseudoJet> boostedSuperJetPart;
@@ -5290,7 +3998,7 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
       double SJ_800_px = 0, SJ_800_py=0,SJ_800_pz=0,SJ_800_E=0;
       double SJ_1000_px = 0, SJ_1000_py=0,SJ_1000_pz=0,SJ_1000_E=0;
 
-       SJ_nAK4_10[nSuperJets] = 0,SJ_nAK4_25[nSuperJets] = 0, SJ_nAK4_50[nSuperJets] = 0,  SJ_nAK4_70[nSuperJets] =0,SJ_nAK4_100[nSuperJets] = 0,SJ_nAK4_125[nSuperJets] = 0,SJ_nAK4_150[nSuperJets] = 0,SJ_nAK4_200[nSuperJets] = 0,SJ_nAK4_300[nSuperJets] = 0,SJ_nAK4_400[nSuperJets] = 0,SJ_nAK4_1000[nSuperJets] = 0;
+      SJ_nAK4_50[nSuperJets] = 0,  SJ_nAK4_70[nSuperJets] =0,SJ_nAK4_100[nSuperJets] = 0,SJ_nAK4_125[nSuperJets] = 0,SJ_nAK4_150[nSuperJets] = 0,SJ_nAK4_200[nSuperJets] = 0,SJ_nAK4_300[nSuperJets] = 0,SJ_nAK4_400[nSuperJets] = 0,SJ_nAK4_1000[nSuperJets] = 0;
       SJ_nAK4_600[nSuperJets] = 0, SJ_nAK4_800[nSuperJets] = 0;
 
 
@@ -5314,15 +4022,7 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
             SJ2_AK4_E[tot_mpp_AK4]  = iPJ->E();          
          }
 
-         CA4_E[tot_mpp_AK4]= iPJ->E();
-         if(iPJ->E()>10.)
-            {
-                SJ_nAK4_10[nSuperJets]++;
-            }
-            if(iPJ->E()>25.)
-            {
-                SJ_nAK4_25[nSuperJets]++;
-            }
+         AK4_E[tot_mpp_AK4]= iPJ->E();
          if(iPJ->E()>50.)
          {
             SJ_AK4_50_mass[tot_nAK4_50] = iPJ->m();
@@ -5340,7 +4040,7 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
          if(iPJ->E()>100)
          {
             SJ_100_px+=iPJ->px();SJ_100_py+=iPJ->py();SJ_100_pz+=iPJ->pz();SJ_100_E+=iPJ->E();
-            //diSuperJet_E_100 +=iPJ->E();diSuperJet_px_100+=iPJ->px();diSuperJet_py_100+=iPJ->py();diSuperJet_pz_100+=iPJ->pz();
+            diSuperJet_E_100 +=iPJ->E();diSuperJet_px_100+=iPJ->px();diSuperJet_py_100+=iPJ->py();diSuperJet_pz_100+=iPJ->pz();
 
             SJ_nAK4_100[nSuperJets]++; 
          }
@@ -5448,55 +4148,12 @@ void clusteringAnalyzerAll_300::analyze(const edm::Event& iEvent, const edm::Eve
    }
    if(_verbose)std::cout << "calculating disuperjet masses" <<std::endl;
    diSuperJet_mass = sqrt(pow(diSuperJet_E,2)-pow(diSuperJet_px,2)-pow(diSuperJet_py,2)-pow(diSuperJet_pz,2));
-  // diSuperJet_mass_100 = sqrt(pow(diSuperJet_E_100,2)-pow(diSuperJet_px_100,2)-pow(diSuperJet_py_100,2)-pow(diSuperJet_pz_100,2));
-   TLorentzVector diSJ_TLV( diSuperJet_px, diSuperJet_py, diSuperJet_pz, diSuperJet_E );
-    diSJ_TLV.Boost(totJetBeta.X(),totJetBeta.Y(),totJetBeta.Z()); // boost BACK to the lab frame to make the comparison 
-
-    diSuperJet_Pt = sqrt(pow(diSJ_TLV.Px(),2)+pow(diSJ_TLV.Py(),2));
-
-    if(_verbose)
-    {
-        std::cout << "The lab-frame diSJ px/py/pz/E are " << diSJ_TLV.Px() << "/" <<diSJ_TLV.Py() << "/" << diSJ_TLV.Pz() << "/" << diSJ_TLV.E() << std::endl;
-        std::cout << "The N-jet px/py/pz/E are          " << selected_AK8_px << "/" << selected_AK8_py<< "/" << selected_AK8_pz << "/" << selected_AK8_E << std::endl;
-    }
-
-    diSuperJet_mass_300 = sqrt(pow(diSuperJet_E_300,2)-pow(diSuperJet_px_300,2)-pow(diSuperJet_py_300,2)-pow(diSuperJet_pz_300,2));
-
-    for(int iii=0;iii<nSuperJets;iii++)
-    {
-        superJet_mass[iii] = sqrt( pow(SJ_mass_E[iii],2) - pow(SJ_mass_px[iii],2) - pow(SJ_mass_py[iii],2) - pow(SJ_mass_pz[iii],2)  );
-    }
-
-    if(_verbose)
-    {
-
-        std:: cout << "------------- New Event ---------------" << std::endl;
-
-        std::cout << "diSuperjet_mass is " << diSuperJet_mass << ", NJetMass is " << NJetMass << std::endl;
-        std::cout << "diSuperjet px/py/pz/E are " << diSuperJet_px<< "/" <<diSuperJet_py << "/" << diSuperJet_pz<< "/" << diSuperJet_E << std::endl; 
-        std::cout << "NJet px/py/pz/E are " << selected_AK8_px<< "/" << selected_AK8_py << "/" << selected_AK8_pz << "/" << selected_AK8_E <<  std::endl;
-        std::cout << "SJ1 mass / SJ2 mass are " << superJet_mass[0] << " / " <<  superJet_mass[1] << std::endl; 
-
-    }
-
-
-    diSJ_mass_perc_diff =   (NJetMass - diSuperJet_mass) / NJetMass;
-    diSJ_Pt_perc_diff   =   (NJetPt - diSuperJet_Pt) / NJetPt;
-
-    if(_verbose)
-    {
-        std::cout << "The N-jet pt is " << NJetPt << ", the disuperjet pt is " << diSuperJet_Pt << std::endl;
-        std::cout << "The mass difference is " << 100*diSJ_mass_perc_diff << "%, the pt difference is " << 100*diSJ_Pt_perc_diff << "%." << std::endl;
-    }
-
-
-    if(_verbose) std::cout << "The diAK8 jet masses are " << diAK8Jet_mass[0] << " / " << diAK8Jet_mass[1] << ", superjet masses are " << superJet_mass[0] << " / " <<  superJet_mass[1] << std::endl;
-
+   diSuperJet_mass_100 = sqrt(pow(diSuperJet_E_100,2)-pow(diSuperJet_px_100,2)-pow(diSuperJet_py_100,2)-pow(diSuperJet_pz_100,2));
    if(_verbose)std::cout << "clear superjets"  <<std::endl;
 
    superJetOne.clear();
    superJetTwo.clear();
-  // if ((nAK8_ET100 < 2) || (nHeavyAK8_pt200_M10 < 1)) return; // RETURN cut
+   if ((nAK8_ET100 < 2) || (nHeavyAK8_pt200_M10 < 1)) return; // RETURN cut
 
    if(_verbose)std::cout << "Filling the tree" <<std::endl;
    tree->Fill();
