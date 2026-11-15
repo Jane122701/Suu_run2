@@ -213,7 +213,7 @@ private:
    //double btag_score_uncut[100];
    int nAK4_uncut = 0;
    int nGenBJets_AK4[100],AK4_hadronFlavour[100], AK4_partonFlavour[100];
-   int nCategories = 3;
+   int nCategories = 2;
    double AK4_ptot[100], AK4_eta[100], AK4_phi[100];
    int SJ1_decision,SJ2_decision;
    double SJ1_BEST_scores,SJ2_BEST_scores;
