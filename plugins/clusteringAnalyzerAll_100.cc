@@ -4180,7 +4180,7 @@ void clusteringAnalyzerAll_100::analyze(const edm::Event& iEvent, const edm::Eve
 
     if(_verbose)  std::cout << "Applying nfatjets/nfatjet_pre/dijet mass selections." << std::endl;
 
-    // _100 only: loosened heavy-AK8 requirement. At least one AK8 jet with pt > 200 GeV, M_SD > 10 GeV, outside HEM
+    // Loosened heavy-AK8 requirement (same in all clusteringAnalyzerAll_* variants). At least one AK8 jet with pt > 200 GeV, M_SD > 10 GeV, outside HEM
     // (nHeavyAK8_pt200_M10) replaces the reference nfatjet_pre >= nHAK8Cut (pt > 500 GeV, M_SD > 45 GeV); nHAK8Cut is not used here
     if(slimmedSelection)
     {

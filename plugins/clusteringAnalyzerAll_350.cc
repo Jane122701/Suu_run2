@@ -471,7 +471,7 @@ clusteringAnalyzerAll_350::clusteringAnalyzerAll_350(const edm::ParameterSet& iC
     }
 
     //if(_verbose) 
-    std::cout << "Using ET / HT / nfatjets / nHAK8 cuts = " << ET_cut << " / " << HT_cut << " / " << nAK8Cut << " / " << nHAK8Cut << std::endl;
+    std::cout << "Using ET / HT / nfatjets cuts = " << ET_cut << " / " << HT_cut << " / " << nAK8Cut << ", heavy AK8 cut: nHeavyAK8_pt200_M10 >= 1" << std::endl;
 
     // "pdfWeights" "NNPDF31"
     triggerBits_ = consumes<edm::TriggerResults>(iConfig.getParameter<edm::InputTag>("bits"));
@@ -4180,13 +4180,15 @@ void clusteringAnalyzerAll_350::analyze(const edm::Event& iEvent, const edm::Eve
 
     if(_verbose)  std::cout << "Applying nfatjets/nfatjet_pre/dijet mass selections." << std::endl;
 
+    // Loosened heavy-AK8 requirement (same in all clusteringAnalyzerAll_* variants). At least one AK8 jet with pt > 200 GeV, M_SD > 10 GeV, outside HEM
+    // (nHeavyAK8_pt200_M10) replaces the reference nfatjet_pre >= nHAK8Cut (pt > 500 GeV, M_SD > 45 GeV); nHAK8Cut is not used here
     if(slimmedSelection)
     {
-        if (  (nfatjets < nAK8Cut) || ((nfatjet_pre < nHAK8Cut) && ( (dijetMassOne < 1000.) || (dijetMassTwo < 1000.))) )  return;  // RETURN cut
+        if (  (nfatjets < nAK8Cut) || ((nHeavyAK8_pt200_M10 < 1) && ( (dijetMassOne < 1000.) || (dijetMassTwo < 1000.))) )  return;  // RETURN cut
     }
     else
     {
-        if ((nfatjets < nAK8Cut) || ((nfatjet_pre < nHAK8Cut) &&  (dijetMassOne < 1000. || dijetMassTwo < 1000. ) ) ) return; // RETURN cut
+        if ((nfatjets < nAK8Cut) || ((nHeavyAK8_pt200_M10 < 1) &&  (dijetMassOne < 1000. || dijetMassTwo < 1000. ) ) ) return; // RETURN cut
     }
     
     /////////////////////////////////////////////////
