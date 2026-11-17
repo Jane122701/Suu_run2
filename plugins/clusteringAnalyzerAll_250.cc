@@ -35,6 +35,7 @@
 #include "FWCore/Framework/interface/Run.h"
 #include "FWCore/Framework/interface/ESHandle.h"
 #include "FWCore/Utilities/interface/InputTag.h"
+#include "FWCore/Utilities/interface/Exception.h"
 #include "FWCore/Utilities/interface/StreamID.h"
 #include "FWCore/ParameterSet/interface/FileInPath.h"
 #include "FWCore/Common/interface/TriggerNames.h"
@@ -262,7 +263,7 @@ private:
     double JEC_uncert_AK8[100],JEC_uncert_AK4[100];
     //MP superjet AK4 jet momenta and energies, tedious,but means we can do some SJ calculations locally, these will also become BEST variables
     double SJ1_AK4_px[20], SJ1_AK4_py[20], SJ1_AK4_pz[20], SJ1_AK4_E[20], CA4_E[500];
-    double SJ2_AK4_px[20], SJ2_AK4_py[20], SJ2_AK4_pz, SJ2_AK4_E[20];
+    double SJ2_AK4_px[20], SJ2_AK4_py[20], SJ2_AK4_pz[20], SJ2_AK4_E[20];
 
     double AK8_hadronFlavour[100], AK8_partonFlavour[100];
     int AK8_SJ_assignment[100], AK4_SJ_assignment[100];
@@ -749,22 +750,24 @@ clusteringAnalyzerAll_250::clusteringAnalyzerAll_250(const edm::ParameterSet& iC
     // this has been changed to split the absolute uncertainty into 2 new sources
     else if ((systematicType.find("AbsoluteCal") != std::string::npos) )    uncertainty_sources = {"SinglePionECAL","SinglePionHCAL"};
     else if ((systematicType.find("AbsolutePU") != std::string::npos) )  uncertainty_sources = { "PileUpDataMC","PileUpPtRef"};
+    // AbsoluteTheory / AbsoluteScale / AbsoluteMPFBias are tested here, before the broad "Absolute" match below,
+    // which would otherwise catch them first (same for HF_year before HF)
+    else if ((systematicType.find("AbsoluteTheory") != std::string::npos) )    uncertainty_sources = {"AbsoluteScale", "Fragmentation","AbsoluteMPFBias","RelativeFSR"};
+    else if ((systematicType.find("AbsoluteScale") != std::string::npos) )  uncertainty_sources = {"AbsoluteScale"};
+    else if ((systematicType.find("AbsoluteMPFBias") != std::string::npos) )    uncertainty_sources = {"AbsoluteMPFBias"};
     else if ((systematicType.find("Absolute") != std::string::npos) )    uncertainty_sources = {"AbsoluteMPFBias", "AbsoluteScale", "Fragmentation","PileUpDataMC","PileUpPtRef","RelativeFSR","SinglePionECAL","SinglePionHCAL"};
 
     // ONES THAT DO NOT CONTRIBUTE ( all scale factors in eta range are 0 )
     // will comment out this
-    else if ((systematicType.find("AbsoluteTheory") != std::string::npos) )    uncertainty_sources = {"AbsoluteScale", "Fragmentation","AbsoluteMPFBias","RelativeFSR"};
 
     // THESE ARE ALWAYS 0 
+    else if ((systematicType.find("HF_year") != std::string::npos) )  uncertainty_sources = {"RelativeStatHF"};
     else if ((systematicType.find("HF") != std::string::npos) )          uncertainty_sources = {"PileUpPtHF", "RelativeJERHF","RelativePtHF"};
     else if ((systematicType.find("EC2_year") != std::string::npos) )    uncertainty_sources = {"RelativeJEREC2","RelativePtEC2"};
     else if ((systematicType.find("EC2") != std::string::npos) )        uncertainty_sources = {"PileUpPtEC2"};
-    else if ((systematicType.find("HF_year") != std::string::npos) )  uncertainty_sources = {"RelativeStatHF"};
 
     // THESE ARE DIFFERENT SPLITTINGS (NOT USED)
-    else if ((systematicType.find("AbsoluteScale") != std::string::npos) )  uncertainty_sources = {"AbsoluteScale"};
     else if ((systematicType.find("Fragmentation") != std::string::npos) )  uncertainty_sources = {"Fragmentation"};
-    else if ((systematicType.find("AbsoluteMPFBias") != std::string::npos) )    uncertainty_sources = {"AbsoluteMPFBias"};
     else if ((systematicType.find("RelativeFSR") != std::string::npos) )       uncertainty_sources = {"RelativeFSR"};
 
     
@@ -1298,7 +1301,7 @@ clusteringAnalyzerAll_250::clusteringAnalyzerAll_250(const edm::ParameterSet& iC
                     if(_verbose) std::cout << "Loaded the replica nominal PDF." << std::endl;
                     for (int i = 0; i < nVars; i++)
                     {
-                        varPDFs[i]      = LHAPDF::mkPDF(pdfname.c_str(),i); // previously was LHAPDF::mkPDF(LHAPDF_VAR_LOW + i);
+                        varPDFs[i]      = LHAPDF::mkPDF(pdfname.c_str(),i+1); // slot i = member i+1 (replicas 1..nVars); member 0 is the central PDF = nomPDF
                     } 
                     if(_verbose) std::cout << "Loaded the replica variation PDFs." << std::endl;
 
@@ -1310,7 +1313,9 @@ clusteringAnalyzerAll_250::clusteringAnalyzerAll_250(const edm::ParameterSet& iC
 
                     for (int i = 0; i< nVars; i++)
                     {
-                        varPDFs_hess[i] = LHAPDF::mkPDF(pdfname_hess.c_str(),i);
+                        varPDFs_hess[i] = LHAPDF::mkPDF(pdfname_hess.c_str(),i+1); // slot i = member i+1; member 0 is the central PDF = nomPDF.
+                                                                                    // Signal (325500, 101 members): slots 0-99 = eigenvectors 1-100.
+                                                                                    // QCD-HT/TTJets/WJets (325300, 103 members): slots 0-99 = eigenvectors 1-100, slots 100,101 = alpha_s members 101,102.
                     }
                     if(_verbose) std::cout << "Loaded the hessian variation PDFs." << std::endl;
                 }
@@ -1684,7 +1689,10 @@ bool clusteringAnalyzerAll_250::isgoodjet(double eta, double NHF,double NEMF, co
     //if( (!passesJetPUid) && (iJet_pt < 50.0)) return false; // jet PU ID is only relevant for AK4 jets with pt < 50 GeV
 
     // apply the tight jet ID
-    if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
+    // UL "TightLepVeto" jet ID, central region (|eta| <= 2.4 for 2016, <= 2.6 for 2017/18; the eta cuts above keep every jet inside it).
+    // A jet passes if NHF < 0.9, NEMF < 0.9, nConstituents > 1, CHF > 0, charged multiplicity > 0, MUF < 0.8, CEMF < 0.8
+    // (thresholds and operators as in PhysicsTools/SelectorUtils PFJetIDSelectionFunctor, RUN2UL16CHS/PUPPI and RUN2ULCHS/PUPPI).
+    if ((NHF>=0.9) || (NEMF>=0.9) || (NumConst<=1) || (CHF<=0.) || (CHM<=0) || (MUF>=0.8) || (CEMF>=0.8)) return false;
     
     return true;
 
@@ -1707,7 +1715,10 @@ bool clusteringAnalyzerAll_250::isgoodjet(double eta, double NHF,double NEMF, co
     }
     
 
-    if ((NHF>0.9) || (NEMF>0.9) || (NumConst<1) || (CHF<0.) || (CHM<0) || (MUF > 0.8) || (CEMF > 0.8)) return false;
+    // UL "TightLepVeto" jet ID, central region (|eta| <= 2.4 for 2016, <= 2.6 for 2017/18; the eta cuts above keep every jet inside it).
+    // A jet passes if NHF < 0.9, NEMF < 0.9, nConstituents > 1, CHF > 0, charged multiplicity > 0, MUF < 0.8, CEMF < 0.8
+    // (thresholds and operators as in PhysicsTools/SelectorUtils PFJetIDSelectionFunctor, RUN2UL16CHS/PUPPI and RUN2ULCHS/PUPPI).
+    if ((NHF>=0.9) || (NEMF>=0.9) || (NumConst<=1) || (CHF<=0.) || (CHM<=0) || (MUF>=0.8) || (CEMF>=0.8)) return false;
     return true;
 }
 // calculates the MPP frame given a TLorentzVector of SJ particles
@@ -3964,13 +3975,13 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
         if(_verbose)    std::cout << "counting AK8 jet types. " << std::endl;
 
         // grid counters for the ET / heavy-AK8 working point scan
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 100.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET100++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 150.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET150++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET200++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 250.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET250++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET300++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 350.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET350++;
-        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) > 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()> 0.)) nAK8_ET400++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 100.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET100++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 150.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET150++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 200.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET200++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 250.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET250++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 300.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET300++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 350.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET350++;
+        if((sqrt(pow(corrJet.mass(),2)+pow(corrJet.pt(),2)) >= 400.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets )) && (corrJet.mass()>= 0.)) nAK8_ET400++;
         if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 10.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M10++;
         if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 20.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M20++;
         if((corrJet.pt() > 600.) && ((corrJet.isPFJet())) && (isgoodjet(corrJet.eta(),corrJet.neutralHadronEnergyFraction(), corrJet.neutralEmEnergyFraction(),corrJet.numberOfDaughters(),corrJet.chargedHadronEnergyFraction(),corrJet.chargedMultiplicity(),corrJet.muonEnergyFraction(),corrJet.chargedEmEnergyFraction(),nfatjets) ) && (M_SD > 30.) && (!isHEM(corrJet.eta(),corrJet.phi()))) nHeavyAK8_pt600_M30++;
@@ -4700,6 +4711,17 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
             // PDF nom = 325300 = ID 1048 (325301-325402 ) 
             // Scale: ID=1049-1150
 
+            // The scale variations below are read from fixed positions 0,5,10,...,40 of the LHE weight vector.
+            // Stop with a clear message if the product is missing or too short, instead of reading past its end.
+            const unsigned int nLHEWeightsNeeded = 41;
+            if( !lheEventProduct.isValid() || lheEventProduct->weights().size() < nLHEWeightsNeeded )
+            {
+                throw cms::Exception("LHEWeights") << "runType " << runType << ": the LHEEventProduct is "
+                    << (lheEventProduct.isValid() ? "too short" : "missing") << " (size = "
+                    << (lheEventProduct.isValid() ? lheEventProduct->weights().size() : 0) << ", need at least "
+                    << nLHEWeightsNeeded << " weights for the fixed scale-variation positions).";
+            }
+
             PDFWeightNom = lheEventProduct->weights()[0].wgt;
 
             if(pdfSetType == "relic")
@@ -4717,13 +4739,13 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
                     PDFstart = 48;
                     PDFend = 147;
                 }
-                else if( runType.find("TTJets"))
-                {  
+                else if( runType.find("TTJets") != std::string::npos)
+                {
                     PDFstart = 48;   // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
                     PDFend  = 147; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
                 }
-                else if( runType.find("WJets"))
-                {  
+                else if( runType.find("WJets") != std::string::npos)
+                {
                     PDFstart = 48;   // <weight MUF="1.0" MUR="1.0" PDF="325301" id="1049"> PDF=325300 MemberID=1 </weight>
                     PDFend  = 149; // <weight MUF="1.0" MUR="1.0" PDF="325402" id="1150"> PDF=325300 MemberID=102 </weight>
                 }
@@ -4734,7 +4756,14 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
                 }
 
 
-                for(unsigned int iii = 0; iii < lheEventProduct->weights().size(); iii++) 
+                if( lheEventProduct->weights().size() < PDFend )
+                {
+                    throw cms::Exception("LHEWeights") << "runType " << runType << ": the LHEEventProduct has "
+                        << lheEventProduct->weights().size() << " weights, but the PDF variations are read from positions "
+                        << PDFstart << " to " << PDFend - 1 << ".";
+                }
+
+                for(unsigned int iii = 0; iii < lheEventProduct->weights().size(); iii++)
                 {
                     //std::cout<<"Systematic "<<iii<<" ID: "<<lheEventProduct->weights()[iii].id<<", value "<<lheEventProduct->weights()[iii].wgt<<", ratio "<<lheEventProduct->weights()[iii].wgt/PDFWeightNom<<std::endl;
                     if( iii >= PDFstart && iii < PDFend) 
@@ -4784,8 +4813,10 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
             // use the "envelope" method to find the largest deviation from the nominal weight
             ////////////////////////////////////////////////////////////////////////////////////
 
-            double max_deviation_up = -9e10;
-            double max_deviation_down = -9e10;
+            // start from the nominal (zero deviation): if no variation lies above (below) the nominal,
+            // the up (down) weight is 1 instead of 1 -/+ 9e10
+            double max_deviation_up = 0.0;
+            double max_deviation_down = 0.0;
 
             for (int iii = 0; iii < 8; iii++) 
             {
@@ -4969,12 +5000,15 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
         }
         if(_verbose) std::cout << "About to loop over daughter particles." << std::endl;
 
-        if (iJet->constituents().size() > 0)
+        // constituents() returns a new vector on every call: keep one copy and iterate over that copy
+        // (begin() and end() taken from two different temporaries is undefined behaviour)
+        const std::vector<fastjet::PseudoJet> iJet_constituents = iJet->constituents();
+        if (iJet_constituents.size() > 0)
         {
 
         if(_verbose) std::cout << "About to loop over the jet daughters to get the boosted daughters" << std::endl;
 
-          for(auto iDaughter = iJet->constituents().begin(); iDaughter != iJet->constituents().end(); iDaughter++)
+          for(auto iDaughter = iJet_constituents.begin(); iDaughter != iJet_constituents.end(); iDaughter++)
           {
             counter++;
             candsBoosted.push_back(reco::LeafCandidate(+1, reco::Candidate::LorentzVector(iDaughter->px(), iDaughter->py(), iDaughter->pz(), iDaughter->E())));
@@ -5195,10 +5229,12 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
         else if(SJMatch == 0) std::cout << "Something didn't work... " << std::endl;
 
         //sort jet particles into either SuperJet 1 or SuperJet 2
-        if (iJet->constituents().size() > 4)
+        // same as above: iterate over one stored copy of the constituents, not over two temporaries
+        const std::vector<fastjet::PseudoJet> iJet_constituents = iJet->constituents();
+        if (iJet_constituents.size() > 4)
         {
-            for(auto iJ = iJet->constituents().begin(); iJ != iJet->constituents().end(); iJ++)
-            {  
+            for(auto iJ = iJet_constituents.begin(); iJ != iJet_constituents.end(); iJ++)
+            {
                 if     (SJMatch==1)superJetOneLV.push_back(TLorentzVector(iJ->px(),iJ->py(),iJ->pz(),iJ->E()));
                 else if(SJMatch==2)superJetTwoLV.push_back(TLorentzVector(iJ->px(),iJ->py(),iJ->pz(),iJ->E()));
             }
@@ -5328,25 +5364,35 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
 
 
         if(_verbose)std::cout << "Looping over reclustered SJ CA4 jets." <<std::endl;
-        for (auto iPJ=jetsFJ_jet.begin(); iPJ<jetsFJ_jet.end(); iPJ++)         
+        // The SJ1/SJ2_AK4_* arrays hold the leading (in energy) CA4 jets of ONE superjet, so they are indexed
+        // by the position of the jet inside this superjet, not by tot_mpp_AK4 (which runs over both superjets).
+        // Nothing is written past the end of an array.
+        const int maxSJ_CA4 = sizeof(SJ1_AK4_px)/sizeof(SJ1_AK4_px[0]);
+        const int maxCA4_E  = sizeof(CA4_E)/sizeof(CA4_E[0]);
+        int iSJ_CA4 = 0;
+        for (auto iPJ=jetsFJ_jet.begin(); iPJ<jetsFJ_jet.end(); iPJ++)
         {
 
-            if(nSuperJets == 0) //SJ1
+            if(iSJ_CA4 < maxSJ_CA4)
             {
-                SJ1_AK4_px[tot_mpp_AK4] = iPJ->px();
-                SJ1_AK4_py[tot_mpp_AK4] = iPJ->py();
-                SJ1_AK4_pz[tot_mpp_AK4] = iPJ->pz();
-                SJ1_AK4_E[tot_mpp_AK4]  = iPJ->E();   
+                if(nSuperJets == 0) //SJ1
+                {
+                    SJ1_AK4_px[iSJ_CA4] = iPJ->px();
+                    SJ1_AK4_py[iSJ_CA4] = iPJ->py();
+                    SJ1_AK4_pz[iSJ_CA4] = iPJ->pz();
+                    SJ1_AK4_E[iSJ_CA4]  = iPJ->E();
+                }
+                else if(nSuperJets == 1) //SJ2
+                {
+                    SJ2_AK4_px[iSJ_CA4] = iPJ->px();
+                    SJ2_AK4_py[iSJ_CA4] = iPJ->py();
+                    SJ2_AK4_pz[iSJ_CA4] = iPJ->pz();
+                    SJ2_AK4_E[iSJ_CA4]  = iPJ->E();
+                }
             }
-            else if(nSuperJets == 1) //SJ2
-            {
-                SJ2_AK4_px[tot_mpp_AK4] = iPJ->px();
-                SJ2_AK4_py[tot_mpp_AK4] = iPJ->py(); 
-                SJ1_AK4_pz[tot_mpp_AK4] = iPJ->pz();
-                SJ2_AK4_E[tot_mpp_AK4]  = iPJ->E();    
-            }
+            iSJ_CA4++;
 
-            CA4_E[tot_mpp_AK4]= iPJ->E();
+            if(tot_mpp_AK4 < maxCA4_E) CA4_E[tot_mpp_AK4]= iPJ->E();
 
             if(iPJ->E()>10.)
             {
@@ -5448,9 +5494,9 @@ void clusteringAnalyzerAll_250::analyze(const edm::Event& iEvent, const edm::Eve
             if(iPJ->E()>1000)
             {
                 SJ_1000_px+=iPJ->px();SJ_1000_py+=iPJ->py();SJ_1000_pz+=iPJ->pz();SJ_1000_E+=iPJ->E();
-                SJ_nAK4_1000[nSuperJets]++; 
+                SJ_nAK4_1000[nSuperJets]++;
             }
-            tot_mpp_AK4++;
+            if(tot_mpp_AK4 < maxCA4_E) tot_mpp_AK4++; // number of entries stored in CA4_E
         }
         if(_verbose)std::cout << "Calculating various SJ masses " << nSuperJets <<std::endl;
         SJ_mass_50[nSuperJets]= sqrt(pow(SJ_50_E,2)-pow(SJ_50_px,2)-pow(SJ_50_py,2)-pow(SJ_50_pz,2));
